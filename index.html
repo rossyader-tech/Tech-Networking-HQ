@@ -4712,7 +4712,7 @@ function renderContactFull(c){
     <div class="av" style="width:54px;height:54px;font-size:1.2rem;background:var(--accent-soft);color:var(--accent-ink);border-radius:99px;display:grid;place-items:center;font-family:'Hanken Grotesk',sans-serif;font-weight:700">${initials(c.name)}</div>
     <div style="flex:1;min-width:0">
       <div class="fv-title" style="font-size:1.7rem">${esc(c.name)}</div>
-      <div class="fv-sub">${esc(c.title||'')}${co?' · ':''}${co?`<a onclick="openCompanyFull('${co.id}')" style="cursor:pointer">${esc(co.name)} →</a>`:esc(c.company||'')}</div>
+      <div class="fv-sub">${esc(c.title||'')}${(c.title&&c.company)?' · ':''}${co?`<a onclick="openCompanyFull('${co.id}')" style="cursor:pointer">${esc(co.name)} →</a>`:esc(c.company||'')}</div>
     </div>
   </div>
   <div class="co-chips" style="margin:.8rem 0">
@@ -4761,7 +4761,23 @@ function renderContactFull(c){
       <button class="btn ghost sm" id="draftBtnFull" onclick="draftMsg('${c.id}','Full')">✍ Draft a message with Claude</button>
       <div id="draftOutFull" style="margin-top:.5rem"></div>
     </div>
+    <div class="fv-card full">
+      <h3>Reclassify</h3>
+      <div class="subtle" style="font-size:.78rem;margin-bottom:.5rem">Don\u2019t actually know them yet — more of a leader you want an intro to? Move them to your People-to-meet list.</div>
+      <button class="btn ghost sm" onclick="moveToPeople('${c.id}')">★ Move to People to meet</button>
+      <button class="btn ghost sm" style="color:var(--red);margin-left:.4rem" onclick="deleteContact('${c.id}')">Delete contact</button>
+    </div>
   </div>`;
+}
+function moveToPeople(id){
+  const c=contact(id);if(!c)return;
+  if(!confirm('Move '+c.name+' to People to meet? They\u2019ll leave your network list.'))return;
+  const p={id:uid('p'),name:c.name,title:c.title||'',company:c.company||'',seniority:c.seniority||'',srank:c.srank||1,
+    why:c.notes||'',introContactId:'',status:'Identified',notes:'',source:'from-network',created:today()};
+  DB.people.push(p);
+  DB.contacts=DB.contacts.filter(x=>x.id!==id);
+  DB.contactOrder=(DB.contactOrder||[]).filter(x=>x!==id);
+  saveDB();toast('Moved to People to meet');cMode='meet';goTab('contacts');openPersonFull(p.id);
 }
 function quickSetContact(id,f,v){const c=contact(id);c[f]=v;if(f==='status'){/*recolor*/}saveDB();paintContacts&&paintContacts();renderWeek();toast('Saved');if(location.hash.startsWith('#contact'))renderContactFull(c);}
 function fmtTime(t){if(!t)return '';const p=t.split(':');let h=parseInt(p[0],10);const m=p[1]||'00';const ap=h<12?'AM':'PM';const hh=((h%12)||12);return hh+':'+String(m).padStart(2,'0')+' '+ap;}
