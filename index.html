@@ -163,6 +163,11 @@ tr.drop-after td{box-shadow:inset 0 -3px 0 -1px var(--accent)}
 .dt-allday{display:flex;align-items:center;gap:.5rem;font-size:.86rem;color:var(--muted);margin:.1rem 0 1rem;cursor:pointer}
 .dt-allday input{width:auto}
 .dt-actions{display:flex;justify-content:flex-end;gap:.5rem}
+.mode-tabs{display:flex;gap:.5rem;margin-bottom:1rem}
+.mode-b{display:inline-flex;align-items:center;gap:.45rem;font-family:'Hanken Grotesk',sans-serif;font-weight:600;font-size:.92rem;padding:.5rem .9rem;border:1px solid var(--line);border-radius:99px;background:var(--surface);color:var(--muted)}
+.mode-b.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.mode-ct{font-family:'JetBrains Mono',monospace;font-size:.66rem;padding:.05rem .4rem;border-radius:99px;background:var(--surface2);color:var(--muted)}
+.mode-b.on .mode-ct{background:rgba(255,255,255,.2);color:#fff}
 .co-card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
 .co-card:active{transform:translateY(1px)}
 .co-top{display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem}
@@ -4306,6 +4311,8 @@ const LS_MODEL= 'hq_model_v1';
 /* ---------- fixed vocabularies ---------- */
 const CONTACT_STATUS = ['New','Reaching out','Active','Nurture','Activated','Dormant','Do not pursue'];
 const NEXT_STEPS = ['Check in','Schedule call','Call scheduled','Send update','Ask for intro','Wait for reply','Nothing right now','Other…'];
+const PEOPLE_STAGES = ['Identified','Need a path','Intro requested','Intro made','In conversation','Building','Parked'];
+const PEOPLE_ACTIVE = ['Need a path','Intro requested','Intro made','In conversation'];
 const JOB_STAGES = ['Found','Researching','Networking in','Referral secured','Recruiter screen','Hiring manager','Onsite/Panel','Offer','Closed','Not a fit'];
 const JOB_CLOSED = ['Closed','Not a fit'];
 const JOB_INTERVIEWING = ['Recruiter screen','Hiring manager','Onsite/Panel'];
@@ -4381,6 +4388,7 @@ function contactsAt(coName){const k=canonName(coName);return DB.contacts.filter(
 function connectors(){return DB.contacts.filter(c=>/connector/i.test(c.roleType)||/connector/i.test(c.roleRaw||''));}
 function company(id){return DB.companies.find(c=>c.id===id);}
 function contact(id){return DB.contacts.find(c=>c.id===id);}
+function person(id){return (DB.people||[]).find(p=>p.id===id);}
 function activeTargets(){return DB.companies.filter(c=>!c.archived && (c.tier==='A'||c.tier==='B'));}
 
 /* status → chip class */
@@ -4441,6 +4449,7 @@ function loadDBdefaults(){
   DB.weekly.goals=DB.weekly.goals||[];
   DB.boardOrder=DB.boardOrder||[];
   DB.contactOrder=DB.contactOrder||[];
+  DB.people=DB.people||[];
   DB.contacts.forEach(migrateStatus);
   DB.jobs.forEach(migrateJob);
   DB.companies.forEach(co=>{co.targets=co.targets||[];co.introPaths=co.introPaths||[];co.history=co.history||[];co.reminder=co.reminder||'';});
@@ -4627,6 +4636,11 @@ function renderCompanyFull(co){
       <h3>Open roles here <span>${roles.length}</span></h3>
       ${roles.length? roles.map(j=>`<div class="queue-item"><div class="qi-main"><div class="qi-name">${j.url?`<a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title)} ↗</a>`:esc(j.title)}</div><div class="qi-meta">${esc(j.level||'')}${j.comp?' · '+esc(j.comp):''}</div></div><span class="chip ${statusChip(j.status)}" style="font-size:.55rem">${esc(j.status)}</span></div>`).join('') : '<div class="subtle" style="font-size:.8rem">No roles linked. Add one from the Jobs tab — it\u2019ll appear here.</div>'}
     </div>
+
+    ${(()=>{const ppl=(DB.people||[]).filter(x=>canonName(x.company)===canonName(co.name));return `<div class="fv-card full">
+      <h3>★ People to meet here <span>${ppl.length}</span></h3>
+      ${ppl.length? ppl.map(x=>`<div class="queue-item" onclick="openPersonFull('${x.id}')" style="cursor:pointer"><div class="qi-main"><div class="qi-name">${esc(x.name)}</div><div class="qi-meta">${esc(x.title||'')}</div></div><span class="chip" style="font-size:.55rem">${esc(x.status)}</span></div>`).join('') : '<div class="subtle" style="font-size:.8rem">None tracked here yet. Add leaders in Contacts → People to meet.</div>'}
+    </div>`;})()}
 
     <div class="fv-card full">
       <h3>🔎 LinkedIn research → add people</h3>
@@ -4889,6 +4903,10 @@ function renderWeek(){
           <span class="chip ${statusChip(co.status)}">${esc(co.status)}</span>
         </div>`).join('')||'<div class="empty">No live processes yet.</div>'}</div>
     </div>
+    ${(()=>{const chase=intrasToChase();return `<div class="card card-pad">
+      <h3>★ Intros to chase <span class="ct">${chase.length}</span></h3>
+      <div>${chase.length?chase.slice(0,8).map(p=>{const via=p.introContactId?contact(p.introContactId):null;return `<div class="queue-item" onclick="openPersonFull('${p.id}')" style="cursor:pointer"><div class="qi-main"><div class="qi-name">${esc(p.name)} <span class="subtle">· ${esc(p.company)}</span></div><div class="qi-meta">${esc(p.title||'')}${via?' · via '+esc(via.name):' · need a path'}</div></div><span class="chip" style="font-size:.55rem">${esc(p.status)}</span></div>`;}).join(''):'<div class="empty">No active intros. Add leaders in Contacts → People to meet.</div>'}</div>
+    </div>`;})()}
   </div>
 
   ${staleStrong().length?`<div class="card card-pad" style="margin-top:1rem">
@@ -5272,12 +5290,23 @@ function addAllResearch(){const {people}=window._research;people.forEach((_,i)=>
 /* ============================================================
    CONTACTS  (CRM)
    ============================================================ */
-let cFilter='all', cSearch='', cSort='manual', cDir='desc', cRenderedIds=[];
+let cFilter='all', cSearch='', cSort='manual', cDir='desc', cRenderedIds=[], cMode='network';
 function renderContacts(){
   const p=$('#panel-contacts');
+  p.innerHTML=`
+  <div class="mode-tabs">
+    <button class="mode-b ${cMode==='network'?'on':''}" onclick="setCMode('network')">◍ My network <span class="mode-ct">${DB.contacts.length}</span></button>
+    <button class="mode-b ${cMode==='meet'?'on':''}" onclick="setCMode('meet')">★ People to meet <span class="mode-ct">${(DB.people||[]).length}</span></button>
+  </div>
+  <div id="cSub"></div>`;
+  if(cMode==='meet')renderPeople(); else renderNetwork();
+}
+function setCMode(m){cMode=m;renderContacts();}
+function renderNetwork(){
+  const sub=$('#cSub');
   const sorts=[['manual','⠿ My order'],['lastTouch','Last touch'],['name','Name'],['roleType','Role'],['strength','Tie'],['status','Status']];
   const arrow = cDir==='asc'?'↑':'↓';
-  p.innerHTML=`
+  sub.innerHTML=`
   <div class="ctrlbar">
     <div class="searchbox"><span class="ic">⌕</span><input id="cSearch" placeholder="Search ${DB.contacts.length} contacts…" value="${esc(cSearch)}"></div>
     <div class="filterset" id="cFilters">
@@ -5297,8 +5326,8 @@ function renderContacts(){
     <th data-s="roleType">Role</th><th data-s="strength">Tie</th><th data-s="status">Status</th><th data-s="lastTouch">Last touch</th><th data-s="nextStep">Next step</th>
   </tr></thead><tbody id="cBody"></tbody></table>`;
   $('#cSearch').oninput=e=>{cSearch=e.target.value;paintContacts();};
-  $('#cFilters').querySelectorAll('.fb').forEach(b=>b.onclick=()=>{cFilter=b.dataset.f;renderContacts();});
-  p.querySelectorAll('.tbl th[data-s]').forEach(th=>th.onclick=()=>setCSort(th.dataset.s));
+  $('#cFilters').querySelectorAll('.fb').forEach(b=>b.onclick=()=>{cFilter=b.dataset.f;renderNetwork();});
+  sub.querySelectorAll('.tbl th[data-s]').forEach(th=>th.onclick=()=>setCSort(th.dataset.s));
   paintContacts();
 }
 function setCSort(key){
@@ -5459,6 +5488,196 @@ function saveNewContact(){
   Drawer.close();renderContacts();toast('✓ Added '+name);
   openContactFull(c.id);
 }
+
+/* ============================================================
+   PEOPLE TO MEET  (aspirational leaders to get introduced to)
+   ============================================================ */
+let pSearch='', pFilter='active';
+function renderPeople(){
+  const sub=$('#cSub');
+  sub.innerHTML=`
+  <div class="ctrlbar">
+    <div class="searchbox"><span class="ic">⌕</span><input id="pSearch" placeholder="Search ${(DB.people||[]).length} people to meet…" value="${esc(pSearch)}"></div>
+    <div class="filterset" id="pFilters">
+      ${[['active','Working on'],['all','All'],['Identified','Identified'],['Building','Building'],['Parked','Parked']].map(([k,l])=>`<button class="fb ${pFilter===k?'on':''}" data-f="${k}">${l}</button>`).join('')}
+    </div>
+    <button class="btn ghost sm" onclick="openAddPersonScreenshot()" style="margin-left:auto">📷 From screenshot</button>
+    <button class="btn sm" onclick="addPerson()">+ Add person</button>
+  </div>
+  <div class="board-bar"><span class="board-hint">Senior leaders you want to get introduced to. Track who can open the door and where the intro stands.</span></div>
+  <table class="tbl"><thead><tr>
+    <th>Name</th><th>Title</th><th>Company</th><th>Intro via</th><th>Stage</th>
+  </tr></thead><tbody id="pBody"></tbody></table>`;
+  $('#pSearch').oninput=e=>{pSearch=e.target.value;paintPeople();};
+  $('#pFilters').querySelectorAll('.fb').forEach(b=>b.onclick=()=>{pFilter=b.dataset.f;renderPeople();});
+  paintPeople();
+}
+function pMatches(p){
+  const s=pSearch.trim().toLowerCase();
+  if(s && !((p.name||'').toLowerCase().includes(s)||(p.company||'').toLowerCase().includes(s)||(p.title||'').toLowerCase().includes(s)))return false;
+  if(pFilter==='active')return PEOPLE_ACTIVE.includes(p.status);
+  if(pFilter==='all')return true;
+  return p.status===pFilter;
+}
+function paintPeople(){
+  const body=$('#pBody');if(!body)return;
+  let list=(DB.people||[]).filter(pMatches).sort((a,b)=>{
+    const o={}; PEOPLE_STAGES.forEach((s,i)=>o[s]=i);
+    if((o[a.status]??9)!==(o[b.status]??9))return (o[a.status]??9)-(o[b.status]??9);
+    return (b.srank||0)-(a.srank||0);
+  });
+  if(!list.length){body.innerHTML='<tr><td colspan="5"><div class="empty">No one here yet. Add a leader you\u2019d want to work for — paste a LinkedIn screenshot or use + Add person.</div></td></tr>';return;}
+  body.innerHTML=list.map(p=>{
+    const via=p.introContactId?contact(p.introContactId):null;
+    const coRef=DB.companies.find(x=>canonName(x.name)===canonName(p.company));
+    return `<tr>
+      <td data-l="Name" class="nm"><a onclick="openPersonFull('${p.id}')" style="cursor:pointer">${esc(p.name)}</a></td>
+      <td data-l="Title">${esc(p.title||'—')}</td>
+      <td data-l="Company">${coRef?`<a onclick="openCompanyFull('${coRef.id}')" style="cursor:pointer">${esc(p.company)}</a>`:esc(p.company||'—')}</td>
+      <td data-l="Intro via">${via?`<a onclick="openContactFull('${via.id}')" style="cursor:pointer">${esc(via.name)}</a>`:'<span class="subtle">need a path</span>'}</td>
+      <td data-l="Stage"><select class="inline-sel" onchange="quickSetPerson('${p.id}','status',this.value)">${PEOPLE_STAGES.map(s=>`<option ${p.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
+    </tr>`;}).join('');
+}
+function quickSetPerson(id,f,v){const p=person(id);if(!p)return;p[f]=v;saveDB();paintPeople();renderWeek();toast('Saved');if(location.hash.startsWith('#person'))renderPersonFull(p);}
+function addPerson(){
+  const name=prompt('Name?');if(!name)return;
+  const p={id:uid('p'),name:name.trim(),title:'',company:'',seniority:'',srank:1,why:'',introContactId:'',status:'Identified',notes:'',source:'manual',created:today()};
+  DB.people.push(p);saveDB();renderContacts();toast('Added '+p.name);openPersonFull(p.id);
+}
+function deletePerson(id){if(!confirm('Remove this person from your list?'))return;DB.people=DB.people.filter(p=>p.id!==id);saveDB();if(location.hash.startsWith('#person'))backFromFull();renderContacts();}
+
+/* person full page */
+function openPersonFull(id){curContext='contacts';curPerson=id;document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));$('#panel-full').classList.add('on');window.scrollTo({top:0,behavior:'instant'});renderPersonFull(person(id));location.hash='person/'+id;}
+let curPerson=null;
+function renderPersonFull(p){
+  if(!p){backFromFull();return;}
+  const via=p.introContactId?contact(p.introContactId):null;
+  const co=DB.companies.find(x=>canonName(x.name)===canonName(p.company));
+  $('#panel-full').innerHTML=`
+  <button class="fv-back" onclick="goTab('contacts')">← Back to People to meet</button>
+  <div class="fv-head">
+    <div class="av" style="width:54px;height:54px;font-size:1.2rem;background:#FBEED9;color:#8a5a00;border-radius:99px;display:grid;place-items:center;font-family:'Hanken Grotesk',sans-serif;font-weight:700">${initials(p.name)}</div>
+    <div style="flex:1;min-width:0">
+      <div class="fv-title" style="font-size:1.7rem">${esc(p.name)}</div>
+      <div class="fv-sub">${esc(p.title||'')}${p.company?' · ':''}${co?`<a onclick="openCompanyFull('${co.id}')" style="cursor:pointer">${esc(co.name)} →</a>`:esc(p.company||'')}</div>
+    </div>
+    <select class="inline-sel" onchange="quickSetPerson('${p.id}','status',this.value)">${PEOPLE_STAGES.map(s=>`<option ${p.status===s?'selected':''}>${s}</option>`).join('')}</select>
+  </div>
+  <div class="fv-grid">
+    <div class="fv-card">
+      <h3>Who they are <button class="editbtn" onclick="editPerson('${p.id}')">Edit</button></h3>
+      <div class="readrow"><span class="k">Title</span><span class="v">${esc(p.title)||'—'}</span></div>
+      <div class="readrow"><span class="k">Company</span><span class="v">${esc(p.company)||'—'}</span></div>
+      <div class="readrow"><span class="k">Seniority</span><span class="v">${esc(p.seniority)||'—'}</span></div>
+      <div class="readrow"><span class="k">Why them</span><span class="v" style="max-width:62%">${esc(p.why)||'—'}</span></div>
+    </div>
+    <div class="fv-card">
+      <h3>Path to an intro</h3>
+      <div class="subtle" style="font-size:.78rem;margin-bottom:.5rem">Who in your network could introduce you? Type a name to pull from Contacts.</div>
+      ${via?`<div class="person"><div class="av">${initials(via.name)}</div><div class="pm"><div class="pn">${esc(via.name)}</div><div class="pt">${esc(via.title||via.roleType)} · ${esc(via.company)}</div></div><div class="px"><button class="linkout" onclick="openContactFull('${via.id}')">open →</button><button class="linkout" style="color:var(--red)" onclick="clearPersonIntro('${p.id}')">remove</button></div></div>`:'<div class="subtle" style="font-size:.8rem">No path yet — find a connector below.</div>'}
+      <div class="ac-wrap" id="pIntroAc"></div>
+    </div>
+    <div class="fv-card full">
+      <h3>Notes</h3>
+      <textarea class="ta" onchange="quickSetPerson('${p.id}','notes',this.value)">${esc(p.notes)}</textarea>
+    </div>
+    <div class="fv-card full">
+      <h3>When you connect</h3>
+      <div class="subtle" style="font-size:.8rem;margin-bottom:.5rem">Once you\u2019ve actually met or started talking, move them into your network as a full contact.</div>
+      <button class="btn ghost sm" onclick="promotePerson('${p.id}')">→ Add to My network as a contact</button>
+      <button class="btn ghost sm" style="color:var(--red);margin-left:.4rem" onclick="deletePerson('${p.id}')">Remove</button>
+    </div>
+  </div>`;
+  mountPersonIntroAutocomplete(p.id);
+}
+function editPerson(id){
+  const p=person(id);
+  const t=prompt('Title',p.title||'');if(t!==null)p.title=t.trim();
+  const c=prompt('Company',p.company||'');if(c!==null)p.company=c.trim();
+  const sv=prompt('Seniority (e.g. VP, Head, Director)',p.seniority||'');if(sv!==null){p.seniority=sv.trim();const s=guessSeniority(p.title||sv);p.srank=s.rank;}
+  const w=prompt('Why them — what makes this someone you\u2019d want to work for?',p.why||'');if(w!==null)p.why=w.trim();
+  saveDB();renderPersonFull(p);
+}
+function clearPersonIntro(id){const p=person(id);p.introContactId='';saveDB();renderPersonFull(p);}
+function mountPersonIntroAutocomplete(pid){
+  const wrap=$('#pIntroAc');if(!wrap)return;
+  wrap.innerHTML=`<input id="pIntroInp" placeholder="+ Find a connector — type a name…" style="width:100%;padding:.5rem .7rem;border:1px solid var(--line);border-radius:var(--r-sm);outline:none"><div id="pIntroResults"></div>`;
+  const inp=$('#pIntroInp'),res=$('#pIntroResults');
+  inp.oninput=()=>{
+    const q=inp.value.trim().toLowerCase();res.innerHTML='';if(q.length<2)return;
+    const matches=DB.contacts.filter(c=>(c.name||'').toLowerCase().includes(q)||(c.company||'').toLowerCase().includes(q)||(c.title||'').toLowerCase().includes(q)).slice(0,6);
+    let html='<div class="ac-list">';
+    matches.forEach(c=>{html+=`<div class="ac-item" onclick="setPersonIntro('${pid}','${c.id}')"><div class="acn">${esc(c.name)}</div><div class="act">${esc(c.title||c.roleType)} · ${esc(c.company)}</div></div>`;});
+    html+='</div>';res.innerHTML=matches.length?html:'<div class="ac-list"><div class="ac-item subtle">No one in your network matches — you may need a cold path.</div></div>';
+  };
+}
+function setPersonIntro(pid,cid){const p=person(pid);p.introContactId=cid;if(p.status==='Identified'||p.status==='Need a path')p.status='Need a path';saveDB();renderPersonFull(p);toast('Connector linked');}
+function promotePerson(id){
+  const p=person(id);if(!p)return;
+  const s=guessSeniority(p.title||'')||{};
+  const c={id:uid('c'),name:p.name,company:p.company||'',title:p.title||'',seniority:p.seniority||s.label||'',srank:p.srank||s.rank||1,
+    strength:'Weak',roleType:'Hiring Manager',roleRaw:'Hiring Manager',lastTouch:'',nextTouch:'',status:'New',nextStep:'Check in',email:'',notes:p.why?('Why: '+p.why):'',touchpoints:[],isTarget:false,source:'people-to-meet'};
+  DB.contacts.push(c);
+  DB.people=DB.people.filter(x=>x.id!==id);
+  saveDB();toast('Moved to your network');cMode='network';goTab('contacts');openContactFull(c.id);
+}
+
+/* add person via LinkedIn screenshot (reuses the parser) */
+function openAddPersonScreenshot(){
+  window._npImg=null;
+  Drawer.open(`
+    <div class="dr-head"><button class="dr-close" onclick="Drawer.close()">✕</button>
+      <div style="flex:1"><div class="dr-title" style="font-size:1.2rem">Add a person to meet</div>
+      <div class="dr-sub">Paste a LinkedIn screenshot or the profile text.</div></div></div>
+    <div class="dr-body">
+      <div class="dr-sec">
+        <div class="dr-sec-h">1 · Drop in the profile</div>
+        <label class="btn ghost sm" style="cursor:pointer;width:100%;justify-content:center">📷 Choose / paste a screenshot<input type="file" accept="image/*" style="display:none" onchange="npPickImage(event)"></label>
+        <div id="npImgState" class="subtle" style="font-size:.78rem;margin:.4rem 0"></div>
+        <div class="subtle" style="font-size:.78rem;margin:.5rem 0 .3rem">…or paste the profile text:</div>
+        <textarea class="ta" id="npText" placeholder="Paste name, headline, About, experience…"></textarea>
+      </div>
+      <button class="btn" id="npParseBtn" style="width:100%;justify-content:center" onclick="parseNewPerson()">✨ Parse with Claude</button>
+      <div id="npResult" style="margin-top:.8rem"></div>
+    </div>`);
+  const ta=$('#npText');
+  if(ta)ta.addEventListener('paste',e=>{const items=(e.clipboardData||{}).items||[];for(const it of items){if(it.type&&it.type.indexOf('image')===0){const f=it.getAsFile();if(f){readNpImage(f);e.preventDefault();}}}});
+}
+async function parseNewPerson(){
+  if(!AI.key()){goTab('settings');toast('Add your Anthropic key in Settings');return;}
+  const text=($('#npText')&&$('#npText').value.trim())||'';
+  if(!window._npImg && !text){toast('Add a screenshot or paste some text first');return;}
+  const btn=$('#npParseBtn');btn.innerHTML='<span class="spinner"></span> Reading…';btn.disabled=true;
+  try{const d=await AI.parseContact({image:window._npImg||undefined,text:text||undefined});showPersonPreview(d);}
+  catch(e){$('#npResult').innerHTML=`<div class="empty" style="color:var(--red)">Couldn\u2019t parse that: ${esc(e.message)}</div>`;}
+  btn.innerHTML='✨ Parse with Claude';btn.disabled=false;
+}
+function showPersonPreview(d){
+  window._npParsed=d||{};
+  $('#npResult').innerHTML=`
+    <div class="dr-sec">
+      <div class="dr-sec-h">2 · Review & save</div>
+      <div class="field"><label>Name</label><input id="pp_name" value="${esc(d.name||'')}"></div>
+      <div class="field-row">
+        <div class="field"><label>Title</label><input id="pp_title" value="${esc(d.title||'')}"></div>
+        <div class="field"><label>Company</label><input id="pp_company" value="${esc(d.company||'')}"></div>
+      </div>
+      <div class="field"><label>Seniority</label><input id="pp_seniority" value="${esc(d.seniority||'')}"></div>
+      <div class="field"><label>Why them (what makes them someone you\u2019d want to work for?)</label><textarea class="ta" id="pp_why">${esc(d.note||'')}</textarea></div>
+      <button class="btn" style="width:100%;justify-content:center" onclick="savePersonFromScreenshot()">✓ Save to People to meet</button>
+    </div>`;
+}
+function savePersonFromScreenshot(){
+  const g=id=>($('#'+id)?$('#'+id).value.trim():'');
+  const name=g('pp_name');if(!name){toast('Name is required');return;}
+  const title=g('pp_title');const s=guessSeniority(title)||{};
+  const p={id:uid('p'),name,title,company:g('pp_company'),seniority:g('pp_seniority')||s.label||'',srank:s.rank||1,
+    why:g('pp_why'),introContactId:'',status:'Identified',notes:'',source:'screenshot',created:today()};
+  DB.people.push(p);saveDB();window._npImg=null;window._npParsed=null;
+  Drawer.close();cMode='meet';renderContacts();toast('✓ Added '+name);openPersonFull(p.id);
+}
+function intrasToChase(){return (DB.people||[]).filter(p=>PEOPLE_ACTIVE.includes(p.status)).sort((a,b)=>(b.srank||0)-(a.srank||0));}
+
 function openContact(id){
   if(id==='new'){
     const name=prompt('Name?');if(!name)return;
@@ -5770,9 +5989,11 @@ $('#globalSearch').addEventListener('keydown',e=>{
   const ctStart=DB.contacts.find(c=>(c.name||'').toLowerCase().startsWith(q));
   const coInc=DB.companies.find(c=>c.name.toLowerCase().includes(q));
   const ctInc=DB.contacts.find(c=>(c.name||'').toLowerCase().includes(q));
-  if(ctStart){openContact(ctStart.id);e.target.blur();return;}
-  if(coInc){openCompany(coInc.id);e.target.blur();return;}
-  if(ctInc){openContact(ctInc.id);e.target.blur();return;}
+  const pInc=(DB.people||[]).find(p=>(p.name||'').toLowerCase().includes(q));
+  if(ctStart){openContactFull(ctStart.id);e.target.blur();return;}
+  if(coInc){openCompanyFull(coInc.id);e.target.blur();return;}
+  if(ctInc){openContactFull(ctInc.id);e.target.blur();return;}
+  if(pInc){openPersonFull(pInc.id);e.target.blur();return;}
   toast('No match for \u201c'+esc(e.target.value)+'\u201d');
 });
 
@@ -5783,6 +6004,7 @@ function routeHash(){
   const h=location.hash.replace(/^#/,'');
   if(h.startsWith('company/')){const id=h.slice(8);if(company(id)){showFull('company',id);return true;}}
   if(h.startsWith('contact/')){const id=h.slice(8);if(contact(id)){showFull('contact',id);return true;}}
+  if(h.startsWith('person/')){const id=h.slice(7);if(person(id)){openPersonFull(id);return true;}}
   return false;
 }
 function boot(){
