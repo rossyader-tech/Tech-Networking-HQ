@@ -4495,6 +4495,13 @@ const AI = {
     const ctx=`Write a short, authentic LinkedIn/email outreach from Ross Yader (17+ yrs performance & partner marketing leader, targeting Director/Head partner-marketing roles at fintech/B2C growth companies) to:\nName: ${c.name}\nTitle: ${c.title}\nCompany: ${c.company}\nRelationship: ${c.strength} tie, ${c.roleType}. ${recency}\nReason for reaching out now: ${reason}.\nKeep it 3-5 sentences, warm, specific, sounds like a real person, no buzzwords, no "I hope this finds you well". Plain text only.`;
     return (await this.call([{role:'user',content:[{type:'text',text:ctx}]}],600)).trim();
   },
+  async draftIntro(connector,target){
+    const ctx=`Write a short, warm, authentic note from Ross Yader (17+ years in performance & partner marketing, currently exploring senior partner/performance-marketing roles) to ${connector.name}${connector.title?' ('+connector.title+')':''}, asking ${connector.name.split(' ')[0]} to introduce him to ${target.name}${target.title?', '+target.title:''}${target.company?' at '+target.company:''}.\n`+
+      (target.why?`Why Ross wants to meet them: ${target.why}\n`:'')+
+      `Ross's relationship with ${connector.name.split(' ')[0]}: ${connector.strength||'Unknown'} tie${connector.notes?'. Context: '+connector.notes:''}.\n`+
+      `Make it genuinely easy to say yes and to forward. 3-5 sentences. End with one crisp, forwardable line about Ross that ${connector.name.split(' ')[0]} could paste straight to ${target.name.split(' ')[0]}. Warm and specific, sounds like a real person, no buzzwords, no "I hope this finds you well". Plain text only.`;
+    return (await this.call([{role:'user',content:[{type:'text',text:ctx}]}],700)).trim();
+  },
   async fetchPage(url){
     const proxies=[u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u), u=>'https://corsproxy.io/?url='+encodeURIComponent(u)];
     let lastErr;
@@ -5590,7 +5597,9 @@ function renderPersonFull(p){
     <div class="fv-card">
       <h3>Path to an intro</h3>
       <div class="subtle" style="font-size:.78rem;margin-bottom:.5rem">Who in your network could introduce you? Type a name to pull from Contacts.</div>
-      ${via?`<div class="person"><div class="av">${initials(via.name)}</div><div class="pm"><div class="pn">${esc(via.name)}</div><div class="pt">${esc(via.title||via.roleType)} · ${esc(via.company)}</div></div><div class="px"><button class="linkout" onclick="openContactFull('${via.id}')">open →</button><button class="linkout" style="color:var(--red)" onclick="clearPersonIntro('${p.id}')">remove</button></div></div>`:'<div class="subtle" style="font-size:.8rem">No path yet — find a connector below.</div>'}
+      ${via?`<div class="person"><div class="av">${initials(via.name)}</div><div class="pm"><div class="pn">${esc(via.name)}</div><div class="pt">${esc(via.title||via.roleType)} · ${esc(via.company)}</div></div><div class="px"><button class="linkout" onclick="openContactFull('${via.id}')">open →</button><button class="linkout" style="color:var(--red)" onclick="clearPersonIntro('${p.id}')">remove</button></div></div>
+      <button class="btn ghost sm" id="introDraftBtn" style="margin-top:.6rem" onclick="draftIntroMsg('${p.id}')">✍ Draft intro ask to ${esc(via.name.split(' ')[0])}</button>
+      <div id="introDraftOut" style="margin-top:.5rem"></div>`:'<div class="subtle" style="font-size:.8rem">No path yet — find a connector below.</div>'}
       <div class="ac-wrap" id="pIntroAc"></div>
     </div>
     <div class="fv-card full">
@@ -5615,6 +5624,20 @@ function editPerson(id){
   saveDB();renderPersonFull(p);
 }
 function clearPersonIntro(id){const p=person(id);p.introContactId='';saveDB();renderPersonFull(p);}
+async function draftIntroMsg(pid){
+  const p=person(pid);const via=(p&&p.introContactId)?contact(p.introContactId):null;
+  if(!via){toast('Link a connector first');return;}
+  if(!AI.key()){goTab('settings');toast('Add your Anthropic key in Settings');return;}
+  const btn=$('#introDraftBtn');const label=btn?btn.innerHTML:'';
+  if(btn){btn.innerHTML='<span class="spinner"></span> Drafting…';btn.disabled=true;}
+  try{
+    const msg=await AI.draftIntro(via,p);
+    $('#introDraftOut').innerHTML=`<textarea class="ta" id="introDraftTa" style="min-height:160px">${esc(msg)}</textarea>
+      <button class="btn sm" style="margin-top:.4rem" onclick="navigator.clipboard.writeText($('#introDraftTa').value);toast('Copied')">Copy</button>
+      <button class="btn ghost sm" style="margin-top:.4rem;margin-left:.4rem" onclick="draftIntroMsg('${pid}')">↻ Redraft</button>`;
+  }catch(e){$('#introDraftOut').innerHTML=`<div class="empty" style="color:var(--red)">Couldn\u2019t draft that: ${esc(e.message)}</div>`;}
+  if(btn){btn.innerHTML=label;btn.disabled=false;}
+}
 function mountPersonIntroAutocomplete(pid){
   const wrap=$('#pIntroAc');if(!wrap)return;
   wrap.innerHTML=`<input id="pIntroInp" placeholder="+ Find a connector — type a name…" style="width:100%;padding:.5rem .7rem;border:1px solid var(--line);border-radius:var(--r-sm);outline:none"><div id="pIntroResults"></div>`;
