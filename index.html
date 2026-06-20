@@ -123,7 +123,8 @@ main{max-width:1180px;margin:0 auto;padding:1.2rem 1.1rem 5rem}
 .goal .box{width:18px;height:18px;border:1.5px solid var(--line);border-radius:5px;flex-shrink:0;cursor:pointer;display:grid;place-items:center;color:#fff;transition:all .12s}
 .goal.done .box{background:var(--green);border-color:var(--green)}
 .goal.done .gt{text-decoration:line-through;color:var(--faint)}
-.goal .gt{flex:1;font-size:.86rem}
+.goal .gt{flex:1;font-size:.86rem;cursor:text;border-radius:5px;padding:.1rem .25rem;margin:-.1rem -.25rem;outline:none}
+.goal .gt:focus{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
 .goal .del{color:var(--faint);font-size:.9rem;opacity:0;transition:opacity .12s}
 .goal:hover .del{opacity:1}
 .goal-add{display:flex;gap:.5rem;margin-top:.6rem}
@@ -342,6 +343,7 @@ hr.div{border:none;border-top:1px solid var(--line);margin:1rem 0}
 
 <main>
   <section class="panel on" id="panel-week"></section>
+  <section class="panel" id="panel-outreach"></section>
   <section class="panel" id="panel-companies"></section>
   <section class="panel" id="panel-contacts"></section>
   <section class="panel" id="panel-jobs"></section>
@@ -4552,7 +4554,7 @@ const AI = {
 /* ============================================================
    TABS
    ============================================================ */
-const TABS=[['week','◧ This Week'],['companies','▣ Companies'],['contacts','◍ Contacts'],['jobs','▤ Jobs'],['settings','⚙ Settings']];
+const TABS=[['week','◧ This Week'],['outreach','◎ Outreach'],['companies','▣ Companies'],['contacts','◍ Contacts'],['jobs','▤ Jobs'],['settings','⚙ Settings']];
 function buildTabs(){
   const bar=$('#tabBar');bar.innerHTML='';
   TABS.forEach(([id,label],i)=>{
@@ -4567,12 +4569,13 @@ function goTab(id,btn){
   $('#panel-'+id).classList.add('on');
   window.scrollTo({top:0,behavior:'instant'});
   if(id==='week')renderWeek();
+  if(id==='outreach')renderOutreach();
   if(id==='companies')renderCompanies();
   if(id==='contacts')renderContacts();
   if(id==='jobs')renderJobs();
   if(id==='settings')renderSettings();
 }
-function renderAll(){renderWeek();renderCompanies();renderContacts();renderJobs();renderSettings();Sync.paint();}
+function renderAll(){renderWeek();renderOutreach();renderCompanies();renderContacts();renderJobs();renderSettings();Sync.paint();}
 
 /* ============================================================
    FULL-SCREEN PROFILES  (company / contact home pages)
@@ -4896,8 +4899,7 @@ function renderWeek(){
   const interviewing=activeTargets().filter(c=>/interview/i.test(c.status));
   const warm=activeTargets().filter(c=>/warm|active|conversation|recruiter/i.test(c.status));
   const upCalls=upcomingCalls(), toSched=callsToSchedule();
-  const plan=w.plan, planActive=plan.filter(x=>!x.done), planDone=plan.filter(x=>x.done);
-  const due=dueSoon(), quiet=goneQuiet();
+  const planActive=(w.plan||[]).filter(x=>!x.done);
   const dueWeekAll=DB.contacts.filter(c=>c.nextTouch && c.nextTouch<=addDays(today(),7) && c.status!=='Do not pursue').length;
   const p=$('#panel-week');
   p.innerHTML=`
@@ -4909,22 +4911,9 @@ function renderWeek(){
     <div class="kpis">
       <div class="kpi"><div class="n">${interviewing.length}</div><div class="l">Interviewing</div></div>
       <div class="kpi"><div class="n">${upCalls.length}</div><div class="l">Calls booked</div></div>
-      <div class="kpi"><div class="n">${planActive.length}</div><div class="l">In your plan</div></div>
+      <div class="kpi" onclick="goTab('outreach')" style="cursor:pointer" title="Open the Outreach tab"><div class="n">${planActive.length}</div><div class="l">In your plan ↗</div></div>
       <div class="kpi"><div class="n">${dueWeekAll}</div><div class="l">Due this week</div></div>
     </div>
-  </div>
-
-  <div class="card card-pad" style="margin-top:1rem">
-    <h3>📨 Outreach plan <span class="ct">${planActive.length} to send${planDone.length?` · ${planDone.length} done`:''}</span></h3>
-    <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .6rem">Your order, top to bottom — #1 is the next one you\u2019ll send. Reorder with ⤒ ↑ ↓. Tap the number to mark it done (logs the touch, resets the 30-day reminder).${planDone.length?` · <button class="linkout" onclick="clearDonePlan()">Clear done</button>`:''}</div>
-    <div id="planList">${plan.length?plan.map((it,i)=>planRow(it,i)).join(''):'<div class="empty">Nothing queued yet. Add people from <b>Suggested</b> below, or with “+ Plan” on any contact.</div>'}</div>
-  </div>
-
-  <div class="card card-pad" style="margin-top:1rem">
-    <h3>💡 Suggested — add to plan <span class="ct">${due.length+quiet.length}</span></h3>
-    ${due.length?`<div class="sugg-h">Due / overdue</div>${due.slice(0,8).map(c=>suggRow(c,dueWhy(c))).join('')}`:''}
-    ${quiet.length?`<div class="sugg-h">Gone quiet · 30+ days</div>${quiet.slice(0,8).map(c=>suggRow(c,daysAgo(c.lastTouch)+'d since last touch')).join('')}`:''}
-    ${(!due.length&&!quiet.length)?'<div class="empty">Nothing surfacing right now — you\u2019re caught up. 🎉</div>':''}
   </div>
 
   <div class="card card-pad" style="margin-top:1rem">
@@ -4962,6 +4951,33 @@ function renderWeek(){
   `;
   renderGoals();
 }
+function renderOutreach(){
+  const w=DB.weekly; w.plan=w.plan||[];
+  const plan=w.plan, planActive=plan.filter(x=>!x.done), planDone=plan.filter(x=>x.done);
+  const due=dueSoon(), quiet=goneQuiet();
+  const p=$('#panel-outreach');
+  p.innerHTML=`
+  <div class="brief">
+    <div class="eyebrow">Outreach</div>
+    <h2>Work your plan</h2>
+    <div class="focus" style="font-size:.92rem">Your ordered send list — plus who to pull in next. <b>${planActive.length}</b> to send${planDone.length?` · ${planDone.length} done`:''}.</div>
+  </div>
+
+  <div class="card card-pad" style="margin-top:1rem">
+    <h3>📨 Outreach plan <span class="ct">${planActive.length} to send${planDone.length?` · ${planDone.length} done`:''}</span></h3>
+    <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .6rem">Your order, top to bottom — #1 is the next one you\u2019ll send. Reorder with ⤒ ↑ ↓. Tap the number to mark it done (logs the touch, resets the 30-day reminder).${planDone.length?` · <button class="linkout" onclick="clearDonePlan()">Clear done</button>`:''}</div>
+    <div id="planList">${plan.length?plan.map((it,i)=>planRow(it,i)).join(''):'<div class="empty">Nothing queued yet. Add people from <b>Suggested</b> below, or with “📨 Add to plan” on any contact.</div>'}</div>
+  </div>
+
+  <div class="card card-pad" style="margin-top:1rem">
+    <h3>💡 Suggested — add to plan <span class="ct">${due.length+quiet.length}</span></h3>
+    <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .5rem">Tap <b>+ Plan</b> to drop someone into your list above, in whatever order you want.</div>
+    ${due.length?`<div class="sugg-h">Due / overdue</div>${due.slice(0,10).map(c=>suggRow(c,dueWhy(c))).join('')}`:''}
+    ${quiet.length?`<div class="sugg-h">Gone quiet · 30+ days</div>${quiet.slice(0,10).map(c=>suggRow(c,daysAgo(c.lastTouch)+'d since last touch')).join('')}`:''}
+    ${(!due.length&&!quiet.length)?'<div class="empty">Nothing surfacing right now — you\u2019re caught up. 🎉</div>':''}
+  </div>
+  `;
+}
 /* ---- Outreach plan + suggestions ---- */
 function addDays(d,n){const x=new Date((d||today())+'T00:00:00');x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
 function inPlan(cid){return (DB.weekly.plan||[]).some(x=>x.cid===cid);}
@@ -4969,12 +4985,12 @@ function dueSoon(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.n
 function goneQuiet(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.lastTouch && daysAgo(c.lastTouch)>=30 && c.status!=='Do not pursue' && !inPlan(c.id) && !(c.nextTouch && c.nextTouch<=lim)).sort((a,b)=>daysAgo(b.lastTouch)-daysAgo(a.lastTouch));}
 function dueWhy(c){if(!c.nextTouch)return '';return c.nextTouch<today()?'overdue · '+relDay(c.nextTouch):'due '+relDay(c.nextTouch);}
 function planDefaultAction(c){if(['Check in','Send update','Ask for intro','Schedule call'].includes(c.nextStep))return c.nextStep;if(c.lastTouch && daysAgo(c.lastTouch)>=30)return 'Reconnect';return 'Check in';}
-function planAdd(cid,action){DB.weekly.plan=DB.weekly.plan||[];if(DB.weekly.plan.some(x=>x.cid===cid)){toast('Already in your plan');return;}const c=contact(cid);if(!c)return;DB.weekly.plan.push({id:uid('pl'),cid,action:action||planDefaultAction(c),done:false});saveDB();renderWeek();toast('Added to plan');}
-function planRemove(id){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>x.id!==id);saveDB();renderWeek();}
-function planMove(id,dir){const a=DB.weekly.plan||[];const i=a.findIndex(x=>x.id===id);if(i<0)return;if(dir==='top'){if(i===0)return;const it=a.splice(i,1)[0];a.unshift(it);}else if(dir==='up'){if(i===0)return;const t=a[i-1];a[i-1]=a[i];a[i]=t;}else if(dir==='down'){if(i>=a.length-1)return;const t=a[i+1];a[i+1]=a[i];a[i]=t;}saveDB();renderWeek();}
+function planAdd(cid,action){DB.weekly.plan=DB.weekly.plan||[];if(DB.weekly.plan.some(x=>x.cid===cid)){toast('Already in your plan');return;}const c=contact(cid);if(!c)return;DB.weekly.plan.push({id:uid('pl'),cid,action:action||planDefaultAction(c),done:false});saveDB();renderOutreach();toast('Added to plan');}
+function planRemove(id){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>x.id!==id);saveDB();renderOutreach();}
+function planMove(id,dir){const a=DB.weekly.plan||[];const i=a.findIndex(x=>x.id===id);if(i<0)return;if(dir==='top'){if(i===0)return;const it=a.splice(i,1)[0];a.unshift(it);}else if(dir==='up'){if(i===0)return;const t=a[i-1];a[i-1]=a[i];a[i]=t;}else if(dir==='down'){if(i>=a.length-1)return;const t=a[i+1];a[i+1]=a[i];a[i]=t;}saveDB();renderOutreach();}
 function planSetAction(id,v){const it=(DB.weekly.plan||[]).find(x=>x.id===id);if(it){it.action=v;saveDB();}}
-function planToggleDone(id){const it=(DB.weekly.plan||[]).find(x=>x.id===id);if(!it)return;it.done=!it.done;if(it.done&&!it.logged){const c=contact(it.cid);if(c){c.touchpoints=c.touchpoints||[];c.touchpoints.push({date:today(),kind:'outreach',note:it.action||'Outreach'});c.lastTouch=today();c.nextTouch=addDays(today(),30);}it.logged=true;}saveDB();renderWeek();toast(it.done?'Logged ✓ — reminder set +30 days':'Marked not done');}
-function clearDonePlan(){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>!x.done);saveDB();renderWeek();toast('Cleared completed');}
+function planToggleDone(id){const it=(DB.weekly.plan||[]).find(x=>x.id===id);if(!it)return;it.done=!it.done;if(it.done&&!it.logged){const c=contact(it.cid);if(c){c.touchpoints=c.touchpoints||[];c.touchpoints.push({date:today(),kind:'outreach',note:it.action||'Outreach'});c.lastTouch=today();c.nextTouch=addDays(today(),30);}it.logged=true;}saveDB();renderOutreach();toast(it.done?'Logged ✓ — reminder set +30 days':'Marked not done');}
+function clearDonePlan(){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>!x.done);saveDB();renderOutreach();toast('Cleared completed');}
 function planRow(it,i){
   const c=contact(it.cid);if(!c)return '';
   const days=daysAgo(c.lastTouch);
@@ -5039,9 +5055,15 @@ function renderGoals(){
   box.innerHTML = g.length? g.map((x,i)=>`
     <div class="goal ${x.done?'done':''}">
       <div class="box" onclick="toggleGoal(${i})">${x.done?'✓':''}</div>
-      <div class="gt">${esc(x.text)}</div>
+      <div class="gt" contenteditable="true" spellcheck="false" title="Click to edit" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="saveGoalText(${i},this.textContent)">${esc(x.text)}</div>
       <button class="del" onclick="delGoal(${i})">✕</button>
     </div>`).join('') : '<div class="subtle" style="padding:.4rem .2rem">No goals yet. What are the 3 things that make this week a win?</div>';
+}
+function saveGoalText(i,txt){
+  const g=DB.weekly.goals[i];if(!g)return;
+  txt=(txt||'').replace(/\s+/g,' ').trim();
+  if(!txt){renderGoals();return;}
+  if(txt!==g.text){g.text=txt;saveDB();}
 }
 function addGoal(){const i=$('#goalInp');const v=(i.value||'').trim();if(!v)return;DB.weekly.goals.push({text:v,done:false});i.value='';saveDB();renderGoals();$('#goalList').scrollIntoView({block:'nearest'});}
 function toggleGoal(i){DB.weekly.goals[i].done=!DB.weekly.goals[i].done;saveDB();renderWeek();}
