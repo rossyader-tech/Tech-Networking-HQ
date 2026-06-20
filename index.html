@@ -5982,6 +5982,16 @@ function renderSettings(){
       <button class="btn ghost sm" style="color:var(--red)" onclick="resetSeed()">Reset to seed</button>
     </div>
     <div class="subtle" style="font-size:.78rem;margin-top:.6rem">Loaded: ${DB.contacts.length} contacts · ${DB.companies.length} companies · ${DB.jobs.length} roles. Last saved: ${DB.updated?new Date(DB.updated).toLocaleString():'—'}</div>
+  </div>
+
+  <div class="card card-pad" style="margin-top:1rem">
+    <h3>Import LinkedIn connections</h3>
+    <div class="subtle" style="font-size:.82rem;margin-bottom:.6rem">Export your connections from LinkedIn (desktop → Settings &amp; Privacy → Data privacy → Get a copy of your data → Connections), then drop the CSV here. I\u2019ll pull in everyone at one of your <b>Tier A/B target companies</b> who works in <b>partner, affiliate, marketing, growth, or BD</b> — deduped against your current contacts. Re-run it anytime you re-download; it only adds new people.</div>
+    <label class="btn ghost sm" style="cursor:pointer">📄 Choose connections.csv<input type="file" accept=".csv,text/csv" style="display:none" onchange="liPickFile(event)"></label>
+    <div class="subtle" style="font-size:.78rem;margin:.5rem 0 .3rem">…or paste the CSV text:</div>
+    <textarea class="ta" id="liText" style="min-height:90px" placeholder="First Name,Last Name,URL,Company,Position,Connected On&#10;…"></textarea>
+    <button class="btn sm" style="margin-top:.5rem" onclick="importLinkedIn()">Scan &amp; preview matches</button>
+    <div id="liResult" style="margin-top:.6rem"></div>
   </div>`;
 }
 function saveAI(){localStorage.setItem(LS_KEY,$('#aiKey').value.trim());localStorage.setItem(LS_MODEL,$('#aiModel').value.trim()||'claude-sonnet-4-6');toast('Saved Claude settings');}
@@ -6018,6 +6028,92 @@ function importJSON(ev){
   r.readAsText(f);
 }
 function resetSeed(){if(!confirm('Reset to the seeded data? This clears local edits.'))return;DB=JSON.parse(JSON.stringify(SEED));saveDB();renderAll();toast('Reset to seed');}
+
+/* ---- LinkedIn connections importer ---- */
+function coCanon(s){
+  return (s||'').toLowerCase()
+    .replace(/&/g,' and ')
+    .replace(/[.,]/g,' ')
+    .replace(/\b(inc|llc|ltd|corp|incorporated|company|the)\b/g,' ')
+    .replace(/[^a-z0-9 ]/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+const LI_EXCLUDE=/(engineer|software|developer|\bfrontend\b|\bbackend\b|attorney|counsel|\blegal\b|paralegal|recruit|talent acquisition|human resources|accountant|accounting|controller|data scientist|data engineer|\bux\b|ui design|graphic design|product design|\bnurse\b|therapist|physician|teacher|professor|realtor|real estate|supply chain|warehouse|logistics|information technology|cybersecurity|customer success|customer experience|account executive|sales development|sales representative|inside sales|underwrit|\bclaims\b)/i;
+const LI_INCLUDE=/(partner|affiliate|marketing|growth|business development|biz dev|\bbd\b|demand|acquisition|lifecycle|performance|\bbrand\b|commerce|go-to-market|\bgtm\b|channel|alliance|influencer|monetization|retention|\bcrm\b|\bmedia\b|revenue)/i;
+function liRelevant(title){const t=(title||'');if(!t.trim())return false;if(LI_EXCLUDE.test(t))return false;return LI_INCLUDE.test(t);}
+function parseCSV(text){
+  const rows=[];let i=0,field='',row=[],inQ=false;
+  const s=(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  while(i<s.length){const ch=s[i];
+    if(inQ){
+      if(ch==='"'){if(s[i+1]==='"'){field+='"';i+=2;continue;}inQ=false;i++;continue;}
+      field+=ch;i++;continue;
+    }else{
+      if(ch==='"'){inQ=true;i++;continue;}
+      if(ch===','){row.push(field);field='';i++;continue;}
+      if(ch==='\n'){row.push(field);rows.push(row);row=[];field='';i++;continue;}
+      field+=ch;i++;continue;
+    }
+  }
+  if(field.length||row.length){row.push(field);rows.push(row);}
+  return rows;
+}
+function importLinkedIn(){
+  const text=($('#liText')&&$('#liText').value)||'';
+  if(!text.trim()){toast('Paste your connections.csv text first');return;}
+  const rows=parseCSV(text);
+  if(!rows.length){toast('Couldn\u2019t read that CSV');return;}
+  let hi=rows.findIndex(r=>r.map(x=>(x||'').trim().toLowerCase()).indexOf('first name')>-1);
+  if(hi<0)hi=0;
+  const hdr=rows[hi].map(x=>(x||'').trim().toLowerCase());
+  const ci={first:hdr.indexOf('first name'),last:hdr.indexOf('last name'),url:hdr.indexOf('url'),company:hdr.indexOf('company'),pos:hdr.indexOf('position'),conn:hdr.indexOf('connected on')};
+  if(ci.first<0||ci.company<0){toast('That doesn\u2019t look like a LinkedIn connections export');return;}
+  const targets={};DB.companies.forEach(co=>{if(co.tier==='A'||co.tier==='B'){const k=coCanon(co.name);if(k)targets[k]=co.name;}});
+  const have=new Set(DB.contacts.map(c=>canonName(c.name)));
+  const haveUrl=new Set(DB.contacts.map(c=>(c.linkedinUrl||'').replace(/\/+$/,'')).filter(Boolean));
+  const add=[],dupes=[],byCo={};
+  for(let r=hi+1;r<rows.length;r++){
+    const row=rows[r];if(!row||!row.length)continue;
+    const name=(((row[ci.first]||'')+' '+(row[ci.last]||'')).trim());if(!name)continue;
+    const company=(ci.company>-1?row[ci.company]||'':'').trim();if(!company)continue;
+    const ck=coCanon(company);const target=targets[ck];if(!target)continue;
+    const title=(ci.pos>-1?row[ci.pos]||'':'').trim();
+    if(!liRelevant(title))continue;
+    const url=(ci.url>-1?row[ci.url]||'':'').trim();
+    const conn=(ci.conn>-1?row[ci.conn]||'':'').trim();
+    if(have.has(canonName(name))||(url&&haveUrl.has(url.replace(/\/+$/,'')))){dupes.push(name);continue;}
+    have.add(canonName(name));
+    const sn=guessSeniority(title);
+    const senior=/director|vice president|\bvp\b|head|chief|\bgm\b|general manager|svp|evp|principal/i.test(title);
+    const rt=senior?'Hiring Manager':'Connector';
+    add.push({id:uid('c'),name,company:target,title,seniority:sn.label,srank:sn.rank,strength:'Weak',
+      roleType:rt,roleRaw:'LinkedIn import',lastTouch:'',nextTouch:'',status:'New',nextStep:'Check in',
+      email:'',notes:'LinkedIn · '+target+(conn?' · connected '+conn:''),linkedinUrl:url,touchpoints:[],isTarget:false,source:'linkedin'});
+    (byCo[target]=byCo[target]||[]).push(name);
+  }
+  window._liAdd=add;
+  showLinkedInPreview(add,dupes,byCo);
+}
+function showLinkedInPreview(add,dupes,byCo){
+  const cos=Object.keys(byCo).sort((a,b)=>byCo[b].length-byCo[a].length);
+  let html=`<div class="subtle" style="font-size:.85rem;margin-bottom:.5rem"><b>${add.length}</b> new partner/marketing/growth/BD ${add.length===1?'contact':'contacts'} at your Tier A/B targets${dupes.length?` · <b>${dupes.length}</b> already in your network (skipped)`:''}.</div>`;
+  if(!add.length){html+='<div class="empty">No new matches — either none at your Tier A/B companies in a relevant role, or they\u2019re already contacts.</div>';$('#liResult').innerHTML=html;return;}
+  html+='<div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:.5rem">';
+  cos.forEach(co=>{html+=`<div style="font-family:'Hanken Grotesk',sans-serif;font-weight:700;margin:.45rem 0 .15rem">${esc(co)} <span class="subtle" style="font-weight:400">· ${byCo[co].length}</span></div>`;
+    byCo[co].forEach(n=>{html+=`<div class="subtle" style="font-size:.82rem;padding-left:.5rem">${esc(n)}</div>`;});});
+  html+='</div>';
+  html+=`<button class="btn" style="width:100%;justify-content:center;margin-top:.6rem" onclick="commitLinkedIn()">✓ Add ${add.length} to Contacts</button>`;
+  $('#liResult').innerHTML=html;
+}
+function commitLinkedIn(){
+  const add=window._liAdd||[];if(!add.length)return;
+  DB.contacts=DB.contacts.concat(add);saveDB();window._liAdd=null;
+  const n=add.length;renderAll();
+  if($('#liText'))$('#liText').value='';
+  toast('✓ Added '+n+' contacts');
+  if($('#liResult'))$('#liResult').innerHTML='<div class="empty">Added '+n+' contacts. Now hit <b>Push &amp; Pull</b> to sync them to your Sheet.</div>';
+}
+function liPickFile(ev){const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{if($('#liText'))$('#liText').value=r.result;importLinkedIn();ev.target.value='';};r.readAsText(f);}
 
 /* ============================================================
    GLOBAL SEARCH  (Enter jumps to best match)
