@@ -4548,6 +4548,17 @@ const AI = {
     const out=await this.call([{role:'user',content:[{type:'text',text:sys}]},{role:'assistant',content:'Understood. I will return only a JSON object.'},{role:'user',content}],900);
     let t=(out||'').replace(/```json|```/g,'').trim();const a=t.indexOf('{'),b=t.lastIndexOf('}');if(a>=0&&b>a)t=t.slice(a,b+1);
     return JSON.parse(t);
+  },
+  async parseCompany({image,text,url}){
+    let body=text||'';
+    if(!body && url){const html=await this.fetchPage(url);body=html.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,12000);}
+    const sys=`From this company info (homepage text, LinkedIn screenshot, or pasted text), extract fields for a job-seeker's target-company tracker. The job-seeker is Ross Yader, a senior performance & partner marketing leader targeting Director/Head partner-marketing, affiliate, growth, and co-marketing roles at fintech / ecommerce / DTC / consumer-growth companies. Return ONLY a JSON object: {"name","category","description","targetFunction","why","fit","remote"}. Rules: "category" = short label like "Consumer Fintech","Ecommerce Platform","DTC Brand","Affiliate Network","B2B Marketplace". "description" = one factual sentence on what they do. "targetFunction" = the team Ross would target (e.g. "Partner Marketing","Growth","Affiliate") or "". "why" = one honest sentence on why this company fits Ross's partner/performance-marketing background, or "" if it clearly doesn't. "fit" = integer 0-10 estimate of fit for Ross (10 = ideal commerce/fintech partner-marketing target; be conservative; 0 if unknown). "remote" = Remote/Hybrid/Onsite/"". Use "" for anything not present. Never invent facts.`;
+    const content=[];
+    if(image)content.push({type:'image',source:image});
+    content.push({type:'text',text:(body?'COMPANY INFO:\n'+body+'\n\n':'')+'Return the JSON object only.'});
+    const out=await this.call([{role:'user',content:[{type:'text',text:sys}]},{role:'assistant',content:'Understood. I will return only a JSON object.'},{role:'user',content}],900);
+    let t=(out||'').replace(/```json|```/g,'').trim();const a=t.indexOf('{'),b=t.lastIndexOf('}');if(a>=0&&b>a)t=t.slice(a,b+1);
+    return JSON.parse(t);
   }
 };
 
@@ -4633,7 +4644,11 @@ function renderCompanyFull(co){
       <div class="readrow"><span class="k">Warm path</span><span class="v">${esc(co.warmPath)||'—'}</span></div>
       <div class="readrow"><span class="k">Target role</span><span class="v">${esc(co.targetFunction||'—')}${co.targetLevel?' · '+esc(co.targetLevel):''}</span></div>
       <div class="readrow"><span class="k">Why it fits</span><span class="v" style="max-width:60%">${esc(co.whyRoss)||'—'}</span></div>
-      ${co.careersSite?`<div class="readrow"><span class="k">Careers</span><span class="v"><a href="${esc(co.careersSite)}" target="_blank" rel="noopener">Open ↗</a></span></div>`:''}
+      <div style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--line2)">
+        <div class="subtle" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Careers / role URL <span style="text-transform:none;letter-spacing:0">— the scanner checks this Mon/Thu</span></div>
+        <input style="width:100%;padding:.45rem .6rem;border:1px solid var(--line);border-radius:var(--r-sm);outline:none;font-size:.82rem" value="${esc(co.careersSite||'')}" placeholder="https://job-boards.greenhouse.io/company  ·  paste & tab out" onchange="setCoField('careersSite',this.value);renderCompanyFull(company(curCo))">
+        ${co.careersSite?`<div style="margin-top:.35rem"><a class="chip accent" href="${esc(co.careersSite)}" target="_blank" rel="noopener" style="font-size:.55rem">↗ Open careers page</a></div>`:''}
+      </div>
     </div>
 
     <div class="fv-card">
@@ -5143,7 +5158,7 @@ function paintCoGrid(){
         <div style="min-width:0"><div class="co-name">${esc(co.name)}</div><div class="co-cat">${esc(co.category||'—')}</div></div>
         <div class="co-chips" style="align-items:center">
           ${board?`<button class="co-mv" title="Move to top" onclick="event.stopPropagation();moveToTop('${co.id}')">⤒</button><button class="co-mv" title="Move up" onclick="event.stopPropagation();moveUpVisible('${co.id}')">↑</button><span class="co-grip" title="Drag to reorder">⠿</span>`:''}
-          <span class="chip tier${co.tier}">Tier ${esc(co.tier)}</span>
+          <button class="chip tier${co.tier}" title="Tap to change tier" onclick="event.stopPropagation();cycleCoTier('${co.id}')" style="cursor:pointer;border:none;font:inherit">Tier ${esc(co.tier)}</button>
         </div>
       </div>
       <div class="co-chips">
@@ -5213,14 +5228,80 @@ const Drawer={
 };
 let curCo=null;
 function openCompany(id){
-  if(id==='new'){
-    const name=prompt('Company name?');if(!name)return;
-    const co={id:uid('co'),name:name.trim(),tier:'B',category:'',fitScore:0,networkScore:0,comp:'',remote:'',targetFunction:'',targetLevel:'Director',status:'Target',nextAction:'Find contacts',whyRoss:'',warmPath:'',careersSite:'',targets:[],archived:false};
-    DB.companies.push(co);saveDB();renderCompanies();id=co.id;
-  }
+  if(id==='new'){openAddCompany();return;}
   const co=company(id);if(!co)return;curCo=id;
   paintCompanyDrawer(co);Drawer.open($('#drawerInner').innerHTML);
 }
+let _acTier='C';
+function openAddCompany(){
+  _acTier='C';window._acImg=null;window._acParsed=null;
+  Drawer.open(`
+  <div class="dr-head">
+    <button class="dr-close" onclick="Drawer.close()">✕</button>
+    <div style="flex:1"><div class="dr-title">Add company</div><div class="dr-sub">New target or research watchlist</div></div>
+  </div>
+  <div class="dr-body">
+    <div class="dr-sec">
+      <div class="dr-sec-h">1 · Smart-fill <span class="subtle" style="font-weight:400">· optional</span></div>
+      <div class="field"><label>Company homepage URL</label><input id="acUrl" placeholder="https://company.com" inputmode="url"></div>
+      <div class="field"><label>…or paste text / a screenshot</label><textarea class="ta" id="acText" placeholder="Paste an About blurb or LinkedIn text — or paste a screenshot right here"></textarea></div>
+      <div id="acImgState" style="margin:.1rem 0 .5rem"></div>
+      <input type="file" accept="image/*" id="acImgInput" style="display:none" onchange="acPickImage(event)">
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="btn ghost sm" onclick="$('#acImgInput').click()">📷 Add screenshot</button>
+        <button class="btn sm" id="acFillBtn" onclick="acSmartFill()">✨ Fill with Claude</button>
+      </div>
+      <div class="subtle" style="font-size:.7rem;margin-top:.4rem">LinkedIn company pages usually block the URL fetch — paste a screenshot of those instead.</div>
+    </div>
+    <div class="dr-sec">
+      <div class="dr-sec-h">2 · Details</div>
+      <div class="field"><label>Company name *</label><input id="ac_name"></div>
+      <div class="field"><label>Tier</label><div class="filterset" id="acTierPick">${['A','B','C'].map(t=>`<button class="fb${t==='C'?' on':''}" data-t="${t}" onclick="acSetTier('${t}')">Tier ${t}</button>`).join('')}</div></div>
+      <div class="field-row">
+        <div class="field"><label>Status</label><select id="ac_status">${COMPANY_STATUS.map(s=>`<option ${s==='Researching'?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="field"><label>Category</label><input id="ac_category" placeholder="e.g. Consumer Fintech"></div>
+      </div>
+      <div class="field"><label>Careers / job-board URL</label><input id="ac_careers" placeholder="https://job-boards.greenhouse.io/…" inputmode="url"></div>
+      <div class="field-row">
+        <div class="field"><label>Target function</label><input id="ac_func" placeholder="e.g. Partner Marketing"></div>
+        <div class="field"><label>Fit (0–10)</label><input id="ac_fit" type="number" min="0" max="10" placeholder="—"></div>
+      </div>
+      <div class="field"><label>Why it fits</label><textarea class="ta" id="ac_why"></textarea></div>
+      <button class="btn" style="width:100%;justify-content:center" onclick="saveNewCompany()">✓ Add company</button>
+    </div>
+  </div>`);
+  const ta=$('#acText');
+  if(ta)ta.addEventListener('paste',e=>{const items=(e.clipboardData||{}).items||[];for(const it of items){if(it.type&&it.type.indexOf('image')===0){const f=it.getAsFile();if(f){readAcImage(f);e.preventDefault();}}}});
+}
+function acSetTier(t){_acTier=t;document.querySelectorAll('#acTierPick .fb').forEach(b=>b.classList.toggle('on',b.dataset.t===t));}
+function acPickImage(ev){const f=ev.target.files[0];if(f)readAcImage(f);}
+function readAcImage(f){const r=new FileReader();r.onload=()=>{window._acImg={type:'base64',media_type:f.type||'image/png',data:r.result.split(',')[1]};const s=$('#acImgState');if(s)s.innerHTML='<span class="chip green">✓ Screenshot ready</span>';};r.readAsDataURL(f);}
+async function acSmartFill(){
+  if(!AI.key()){goTab('settings');toast('Add your Anthropic key in Settings');return;}
+  const url=($('#acUrl')&&$('#acUrl').value.trim())||'';
+  const text=($('#acText')&&$('#acText').value.trim())||'';
+  if(!url && !text && !window._acImg){toast('Add a URL, paste text, or a screenshot first');return;}
+  const btn=$('#acFillBtn');const old=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Reading…';btn.disabled=true;
+  try{
+    const d=await AI.parseCompany({image:window._acImg||undefined,text:text||undefined,url:url||undefined});
+    window._acParsed=d||{};
+    const set=(id,v)=>{const e=$('#'+id);if(e&&v!=null&&v!=='')e.value=v;};
+    set('ac_name',d.name);set('ac_category',d.category);set('ac_func',d.targetFunction);
+    if(d.fit!=null&&d.fit!=='')set('ac_fit',d.fit);
+    const why=[d.why,d.description].filter(Boolean).join(' ');if(why)set('ac_why',why);
+    toast('✓ Filled — review & save');
+  }catch(e){toast('Couldn\u2019t read that: '+e.message);}
+  btn.innerHTML=old;btn.disabled=false;
+}
+function saveNewCompany(){
+  const g=id=>($('#'+id)?$('#'+id).value.trim():'');
+  const name=g('ac_name');if(!name){toast('Company name is required');return;}
+  const fit=parseInt(g('ac_fit'),10);const p=window._acParsed||{};
+  const co={id:uid('co'),name,tier:_acTier||'C',category:g('ac_category'),fitScore:isNaN(fit)?0:Math.max(0,Math.min(10,fit)),networkScore:0,comp:'',remote:p.remote||'',targetFunction:g('ac_func'),targetLevel:'Director',status:g('ac_status')||'Researching',nextAction:'Find contacts',whyRoss:g('ac_why'),warmPath:'',careersSite:g('ac_careers'),targets:[],archived:false};
+  DB.companies.push(co);saveDB();window._acImg=null;window._acParsed=null;
+  Drawer.close();renderCompanies();toast('✓ Added '+name);openCompanyFull(co.id);
+}
+function cycleCoTier(id){const co=company(id);if(!co)return;const o=['A','B','C'];co.tier=o[(o.indexOf(co.tier)+1)%3];saveDB();renderCompanies();toast('→ Tier '+co.tier);}
 function paintCompanyDrawer(co){
   const known=contactsAt(co.name).sort((a,b)=>(b.srank||0)-(a.srank||0));
   const conns=connectors().filter(c=>canonName(c.company)!==canonName(co.name));
@@ -5449,12 +5530,46 @@ function renderDirectory(){
       <button class="fb ${dirRelevant?'on':''}" id="dirRelBtn">Partner/mktg/growth/BD</button>
     </div>
   </div>
-  <div class="subtle" style="font-size:.78rem;margin:-.3rem 0 .55rem">Cached locally on this device — not synced. Re-import your CSV in Settings to refresh. Adding someone copies them into Contacts (then Push &amp; Pull to sync).</div>
+  <div class="subtle" style="font-size:.78rem;margin:-.3rem 0 .55rem">Ranked by fit — partnerships & commerce/DTC roles first (★★★ = strongest). Search to find anyone. Cached locally on this device; adding copies into Contacts (then Push &amp; Pull to sync).</div>
   <div id="dirBody"></div>`;
   $('#dirSearch').oninput=e=>{dirQ=e.target.value;paintDirectory();};
   $('#dirBoardBtn').onclick=()=>{dirBoardOnly=!dirBoardOnly;renderDirectory();};
   $('#dirRelBtn').onclick=()=>{dirRelevant=!dirRelevant;renderDirectory();};
   paintDirectory();
+}
+/* ---- Directory reconnect scoring (local, no API) ---- */
+/* Editable orbit lists — commerce/DTC prioritized, fintech included. Tell me names to add. */
+const ADJ_ECOM_RAW=['Shopify','OpenStore','Faire','Whatnot','Etsy','eBay','Amazon','Walmart','Target','Mercari','Poshmark','ThredUp','StockX','GOAT','Klaviyo','Attentive','Yotpo','Recharge','Gorgias','Triple Whale','Postscript','Rokt','Wildfire Systems','Impact','Impact.com','Partnerize','CJ Affiliate','Commission Junction','Rakuten','Rakuten Advertising','Awin','Pepperjam','ShareASale','Skimlinks','Sovrn','Honey','Ibotta','Capital One Shopping','Allbirds','Warby Parker','Glossier','Casper','Away','Brooklinen','Bombas','Olipop','Liquid Death','Caraway','Our Place','Rothys','Vuori','Gymshark','True Classic','Ridge','MeUndies','Chubbies'];
+const ADJ_FIN_RAW=['LendingTree','Bankrate','NerdWallet','SoFi','Credit Karma','Affirm','Klarna','Afterpay','Chime','Dave','MoneyLion','Upgrade','Upstart','Rocket Money','Rocket Mortgage','Achieve','Credit Sesame','Self','Kikoff','Acorns','Robinhood','Mercury','Brex','Ramp','Plaid','Marqeta','Stripe','Block','Square','PayPal','Intuit','Experian','Equifax','TransUnion','Capital One','Discover','Synchrony','American Express','QuinStreet','Red Ventures','WalletHub','Varo','Current','Greenlight','Possible Finance'];
+const ADJ_ECOM_RE=/shopify|\bdtc\b|\bd2c\b|e-?comm|ecommerce|\bcommerce\b|marketplace|retail|consumer goods|\bcpg\b|merchant|apparel|footwear|fashion|beauty|cosmetic|skincare|haircare|\bwellness\b|supplement|subscription box|\bshop\b/i;
+const ADJ_FIN_RE=/fintech|\bbank|banking|lending|\bloan|credit|mortgage|\bpay\b|payments?|\bfinanc|insurance|insurtech|wealth|invest|brokerage|crypto|neobank|\bbnpl\b|debit|\bcard\b/i;
+let _ADJ=null;
+function adjSets(){if(_ADJ)return _ADJ;_ADJ={e:new Set(ADJ_ECOM_RAW.map(coCanon)),f:new Set(ADJ_FIN_RAW.map(coCanon))};return _ADJ;}
+function coAdjacency(company){
+  const k=coCanon(company);if(!k)return '';const S=adjSets();
+  if(S.e.has(k)||ADJ_ECOM_RE.test(company||''))return 'ecom';
+  if(S.f.has(k)||ADJ_FIN_RE.test(company||''))return 'fin';
+  return '';
+}
+function dirScore(d){
+  const title=d.title||'';
+  if(LI_EXCLUDE.test(title))return null; /* clearly off-lane → drop from ranking */
+  let role=4,roleTag='';
+  if(/partner|affiliate|co-?marketing|alliance|channel|business development|biz dev|\bbd\b/i.test(title)){role=32;roleTag='Partnerships';}
+  else if(/founder|\bceo\b|owner|\bpresident\b|chief executive/i.test(title)){role=26;roleTag='Founder/Exec';}
+  else if(/growth|performance|acquisition|demand|lifecycle|monetization|retention|paid (search|social|media)/i.test(title)){role=24;roleTag='Growth';}
+  else if(/marketing|\bbrand\b|\bcrm\b|commerce|go-to-market|\bgtm\b|influencer|\bseo\b|\bsem\b|content|revenue|\bmedia\b/i.test(title)){role=16;roleTag='Marketing';}
+  else if(liRelevant(title)){role=10;roleTag='Adjacent';}
+  const sn=guessSeniority(title);
+  const SEN={1:6,2:12,3:20,4:22,5:20};const senPts=SEN[sn.rank]||10;
+  const onBoard=window._dirBoardSet&&window._dirBoardSet.has(coCanon(d.company));
+  const adj=onBoard?'':coAdjacency(d.company);
+  let coPts=0,coTag='';
+  if(onBoard){coPts=24;coTag='Target co';}
+  else if(adj==='ecom'){coPts=22;coTag='Commerce/DTC';}
+  else if(adj==='fin'){coPts=15;coTag='Fintech';}
+  let rec=1;const yr=((d.conn||'').match(/(20\d\d)/)||[])[1];if(yr){const age=2026-(+yr);rec=age>=4?6:age>=2?3:1;}
+  return {score:role+senPts+coPts+rec,roleTag,coTag,sen:sn};
 }
 function dirMatches(d){
   const q=dirQ.trim().toLowerCase();
@@ -5465,23 +5580,34 @@ function dirMatches(d){
 }
 function paintDirectory(){
   const body=$('#dirBody');if(!body)return;
-  if(!dirQ.trim() && !dirBoardOnly && !dirRelevant){
-    body.innerHTML=`<div class="empty" style="padding:1.2rem;text-align:center">Type a name, company, or title to search your ${DIR.length} connections — or tap a filter above.</div>`;
-    return;
-  }
   const have=new Set(DB.contacts.map(c=>canonName(c.name)));
-  const all=DIR.filter(dirMatches);
-  const CAP=150,shown=all.slice(0,CAP);
-  let html=`<div class="subtle" style="font-size:.8rem;margin-bottom:.4rem">${all.length} ${all.length===1?'match':'matches'}${all.length>CAP?` · showing first ${CAP}`:''}</div><table class="tbl"><tbody>`;
-  shown.forEach(d=>{
+  const searching = dirQ.trim() || dirBoardOnly || dirRelevant;
+  let list=DIR.filter(dirMatches).map(d=>({d,s:dirScore(d)}));
+  if(!searching){
+    list=list.filter(x=>x.s && !have.has(canonName(x.d.name)) && x.s.score>=18);
+  }
+  list.sort((a,b)=>{const sa=a.s?a.s.score:-1,sb=b.s?b.s.score:-1;if(sb!==sa)return sb-sa;return (b.s?b.s.sen.rank:0)-(a.s?a.s.sen.rank:0);});
+  const CAP = searching?200:60;
+  const shown=list.slice(0,CAP);
+  const notInC=DIR.filter(d=>!have.has(canonName(d.name))).length;
+  const head = searching
+    ? `${list.length} ${list.length===1?'match':'matches'}${list.length>CAP?` · showing first ${CAP}`:''}`
+    : `Top ${shown.length} to reach out to · ranked by fit <span class="subtle">· ${notInC} not yet in contacts</span>`;
+  let html=`<div class="subtle" style="font-size:.8rem;margin-bottom:.45rem">${head}</div><table class="tbl"><tbody>`;
+  shown.forEach(({d,s})=>{
     const inC=have.has(canonName(d.name));
-    const onBoard=window._dirBoardSet&&window._dirBoardSet.has(coCanon(d.company));
+    const stars = s? (s.score>=58?'★★★':s.score>=40?'★★':'★') : '';
+    const badge = stars?`<span style="color:#c2691d;font-size:.62rem;letter-spacing:-.5px;vertical-align:middle">${stars}</span> `:'';
+    const why = s? [s.roleTag,s.sen.label,s.coTag].filter(Boolean).join(' · ') : '';
     html+=`<tr>
-      <td><div style="font-weight:600">${esc(d.name)}</div><div class="subtle" style="font-size:.78rem">${esc(d.title||'—')}${d.company?' · '+esc(d.company):''}${onBoard?' <span class="chip slate" style="font-size:.5rem">on board</span>':''}</div></td>
+      <td><div style="font-weight:600">${badge}${esc(d.name)}</div>
+        <div class="subtle" style="font-size:.78rem">${esc(d.title||'—')}${d.company?' · '+esc(d.company):''}</div>
+        ${why?`<div class="subtle" style="font-size:.66rem;opacity:.78">${esc(why)}</div>`:''}</td>
       <td style="text-align:right;white-space:nowrap">${inC?'<span class="chip green" style="font-size:.55rem">✓ in contacts</span>':`<button class="btn ghost sm" onclick="addFromDirectory('${d.id}')">+ Add</button>`}</td>
     </tr>`;
   });
   html+='</tbody></table>';
+  if(!shown.length)html='<div class="empty" style="padding:1rem;text-align:center">'+(searching?'No matches.':'No new high-fit connections found — try a search above, or re-import your CSV in Settings.')+'</div>';
   body.innerHTML=html;
 }
 function addFromDirectory(id){
