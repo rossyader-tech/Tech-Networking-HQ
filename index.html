@@ -101,6 +101,18 @@ main{max-width:1180px;margin:0 auto;padding:1.2rem 1.1rem 5rem}
 .qi-name{font-weight:600;font-size:.88rem}
 .qi-meta{font-size:.74rem;color:var(--muted);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis}
 .qi-act{font-size:.7rem;color:var(--accent);font-weight:600;white-space:nowrap;cursor:pointer}
+.plan-item{display:flex;gap:.6rem;align-items:flex-start;padding:.65rem .1rem;border-bottom:1px solid var(--line2)}
+.plan-item:last-child{border-bottom:none}
+.plan-item.done{opacity:.55}
+.plan-item.done .qi-name{text-decoration:line-through}
+.plan-reorder{display:flex;flex-direction:column;gap:3px;flex:0 0 auto;padding-top:2px}
+.plan-reorder .mini{width:22px;height:17px;line-height:1;border:1px solid var(--line);background:var(--surface);border-radius:5px;cursor:pointer;font-size:.7rem;color:var(--muted);padding:0}
+.plan-reorder .mini:hover{border-color:var(--accent);color:var(--accent)}
+.plan-check{flex:0 0 auto;width:26px;height:26px;border-radius:50%;border:2px solid var(--accent);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.78rem;cursor:pointer;user-select:none;margin-top:1px}
+.plan-check.on{background:var(--accent);color:#fff}
+.plan-main{flex:1 1 auto;min-width:0}
+.plan-actions{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
+.sugg-h{font-family:'Hanken Grotesk',sans-serif;font-weight:700;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin:.7rem 0 .15rem}
 .card-pad{padding:1rem 1.1rem}
 .card-pad h3{font-family:'Hanken Grotesk',sans-serif;font-size:.95rem;font-weight:700;margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:center}
 .card-pad h3 .ct{font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--faint);font-weight:400}
@@ -4315,6 +4327,10 @@ const PEOPLE_STAGES = ['Identified','Need a path','Intro requested','Intro made'
 const PEOPLE_ACTIVE = ['Need a path','Intro requested','Intro made','In conversation'];
 const JOB_STAGES = ['Found','Researching','Networking in','Referral secured','Recruiter screen','Hiring manager','Onsite/Panel','Offer','Closed','Not a fit'];
 const JOB_CLOSED = ['Closed','Not a fit'];
+const COMPANY_STATUS = ['Target','Researching','Warm Path','Active Conversation','Recruiter Screen','Interviewing','Post-Interview','Offer','Stay in Touch','Network Only','Passed / Closed'];
+const CO_STATUS_MIGRATE = {'':'Target','Post-interview':'Post-Interview','Recruiter Call':'Recruiter Screen','In Process':'Interviewing','Not a fit':'Passed / Closed','Closed':'Passed / Closed'};
+function migrateCoStatus(co){if(!co)return;if(CO_STATUS_MIGRATE[co.status]!==undefined)co.status=CO_STATUS_MIGRATE[co.status];if(!COMPANY_STATUS.includes(co.status))co.status='Target';}
+const PLAN_ACTIONS = ['Check in','Reconnect','Send update','Schedule call','Ask for intro'];
 const JOB_INTERVIEWING = ['Recruiter screen','Hiring manager','Onsite/Panel'];
 
 /* map legacy free-text → fixed stages (run once on load) */
@@ -4447,12 +4463,14 @@ function loadDBdefaults(){
   DB.contacts=DB.contacts||[]; DB.companies=DB.companies||[]; DB.jobs=DB.jobs||[];
   DB.weekly=DB.weekly||{weekOf:today(),focus:'',goals:[],outreachQueue:[]};
   DB.weekly.goals=DB.weekly.goals||[];
+  DB.weekly.plan=DB.weekly.plan||[];
   DB.boardOrder=DB.boardOrder||[];
   DB.contactOrder=DB.contactOrder||[];
   DB.people=DB.people||[];
   DB.contacts.forEach(migrateStatus);
   DB.jobs.forEach(migrateJob);
-  DB.companies.forEach(co=>{co.targets=co.targets||[];co.introPaths=co.introPaths||[];co.history=co.history||[];co.reminder=co.reminder||'';});
+  DB.companies.forEach(co=>{migrateCoStatus(co);co.targets=co.targets||[];co.introPaths=co.introPaths||[];co.history=co.history||[];co.reminder=co.reminder||'';});
+  DB.weekly.plan=DB.weekly.plan.filter(it=>it&&it.cid&&DB.contacts.some(c=>c.id===it.cid));
 }
 
 /* ============================================================
@@ -4487,11 +4505,13 @@ const AI = {
     const out=await this.call([{role:'user',content:[{type:'text',text:sys}]},{role:'assistant',content:'Understood. I will return only a JSON array.'},{role:'user',content}],2000);
     return this.parseJSON(out);
   },
-  async draftMessage(c,co){
+  async draftMessage(c,co,opts){
+    opts=opts||{};
+    const action=opts.action||c.nextStep;
     const days=daysAgo(c.lastTouch);
     const recency = days!=null ? `Last spoke ${days} days ago.` : 'No recent contact logged.';
-    const reasonMap={'Check in':'check in and see if they\u2019ve heard of anything','Schedule call':'set up a quick catch-up call','Send update':'share a brief update on his search','Ask for intro':'ask if they could make an introduction','Wait for reply':'gently follow up'};
-    const reason = reasonMap[c.nextStep] || (co? 'learn about '+co.name+' and who to talk to about a '+(co.targetFunction||'partner marketing')+' role' : 'reconnect and explore fit');
+    const reasonMap={'Check in':'check in and see if they\u2019ve heard of anything','Reconnect':'reconnect after a while \u2014 it has been some time since they last spoke \u2014 and see if anything new has come up on their end. No hard ask; just getting back on their radar.','Schedule call':'set up a quick catch-up call','Send update':'share a brief update on his search','Ask for intro':'ask if they could make an introduction','Wait for reply':'gently follow up'};
+    const reason = reasonMap[action] || (co? 'learn about '+co.name+' and who to talk to about a '+(co.targetFunction||'partner marketing')+' role' : 'reconnect and explore fit');
     const ctx=`Write a short, authentic LinkedIn/email outreach from Ross Yader (17+ yrs performance & partner marketing leader, targeting Director/Head partner-marketing roles at fintech/B2C growth companies) to:\nName: ${c.name}\nTitle: ${c.title}\nCompany: ${c.company}\nRelationship: ${c.strength} tie, ${c.roleType}. ${recency}\nReason for reaching out now: ${reason}.\nKeep it 3-5 sentences, warm, specific, sounds like a real person, no buzzwords, no "I hope this finds you well". Plain text only.`;
     return (await this.call([{role:'user',content:[{type:'text',text:ctx}]}],600)).trim();
   },
@@ -4595,7 +4615,7 @@ function renderCompanyFull(co){
       <div class="fv-sub">${esc(co.category||'')}${co.remote?' · '+esc(co.remote):''}</div>
     </div>
     <span class="chip tier${co.tier}">Tier ${esc(co.tier)}</span>
-    <select class="inline-sel" onchange="setCoField('status',this.value);renderCompanyFull(company(curCo))">${['Target','Warm Path','Active Conversation','Recruiter Call','Interviewing','Post-interview','Not a fit'].map(s=>`<option ${co.status===s?'selected':''}>${s}</option>`).join('')}</select>
+    <select class="inline-sel" onchange="setCoField('status',this.value);renderCompanyFull(company(curCo))">${COMPANY_STATUS.map(s=>`<option ${co.status===s?'selected':''}>${s}</option>`).join('')}</select>
   </div>
   <div class="metric-row" style="max-width:520px;margin-top:1rem">
     <div class="metric"><input class="metric-edit" type="number" min="0" max="10" value="${co.fitScore||''}" placeholder="—" onchange="setCoNum('fitScore',this.value)"><div class="l">Fit score</div></div>
@@ -4742,6 +4762,7 @@ function renderContactFull(c){
     <div class="fv-card">
       <h3>Stay in touch</h3>
       <button class="btn sm" onclick="logTouch('${c.id}')">✓ Log a touch (today)</button>
+      <button class="btn ghost sm" style="margin-left:.4rem" onclick="planAdd('${c.id}')">📨 Add to plan</button>
       <div class="subtle" style="font-size:.78rem;margin:.6rem 0 .3rem">Remind me to reach back out:</div>
       <div class="row-actions">
         <button class="btn ghost sm" onclick="remindIn('${c.id}',14)">in 2 wks</button>
@@ -4871,11 +4892,13 @@ function outreachQueue(){return DB.contacts.filter(c=>['Check in','Send update',
 function staleStrong(){return DB.contacts.filter(c=>c.strength==='Strong' && c.status!=='Do not pursue' && c.lastTouch && daysAgo(c.lastTouch)>30).sort((a,b)=>daysAgo(b.lastTouch)-daysAgo(a.lastTouch));}
 
 function renderWeek(){
-  const w=DB.weekly;
+  const w=DB.weekly; w.plan=w.plan||[];
   const interviewing=activeTargets().filter(c=>/interview/i.test(c.status));
   const warm=activeTargets().filter(c=>/warm|active|conversation|recruiter/i.test(c.status));
-  const calls=callsInPlay(), out=outreachQueue(), due=dueContacts();
   const upCalls=upcomingCalls(), toSched=callsToSchedule();
+  const plan=w.plan, planActive=plan.filter(x=>!x.done), planDone=plan.filter(x=>x.done);
+  const due=dueSoon(), quiet=goneQuiet();
+  const dueWeekAll=DB.contacts.filter(c=>c.nextTouch && c.nextTouch<=addDays(today(),7) && c.status!=='Do not pursue').length;
   const p=$('#panel-week');
   p.innerHTML=`
   <div class="brief">
@@ -4886,9 +4909,22 @@ function renderWeek(){
     <div class="kpis">
       <div class="kpi"><div class="n">${interviewing.length}</div><div class="l">Interviewing</div></div>
       <div class="kpi"><div class="n">${upCalls.length}</div><div class="l">Calls booked</div></div>
-      <div class="kpi"><div class="n">${out.length}</div><div class="l">Outreach queue</div></div>
-      <div class="kpi"><div class="n">${due.length}</div><div class="l">Touchpoints due</div></div>
+      <div class="kpi"><div class="n">${planActive.length}</div><div class="l">In your plan</div></div>
+      <div class="kpi"><div class="n">${dueWeekAll}</div><div class="l">Due this week</div></div>
     </div>
+  </div>
+
+  <div class="card card-pad" style="margin-top:1rem">
+    <h3>📨 Outreach plan <span class="ct">${planActive.length} to send${planDone.length?` · ${planDone.length} done`:''}</span></h3>
+    <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .6rem">Your order, top to bottom — #1 is the next one you\u2019ll send. Reorder with ⤒ ↑ ↓. Tap the number to mark it done (logs the touch, resets the 30-day reminder).${planDone.length?` · <button class="linkout" onclick="clearDonePlan()">Clear done</button>`:''}</div>
+    <div id="planList">${plan.length?plan.map((it,i)=>planRow(it,i)).join(''):'<div class="empty">Nothing queued yet. Add people from <b>Suggested</b> below, or with “+ Plan” on any contact.</div>'}</div>
+  </div>
+
+  <div class="card card-pad" style="margin-top:1rem">
+    <h3>💡 Suggested — add to plan <span class="ct">${due.length+quiet.length}</span></h3>
+    ${due.length?`<div class="sugg-h">Due / overdue</div>${due.slice(0,8).map(c=>suggRow(c,dueWhy(c))).join('')}`:''}
+    ${quiet.length?`<div class="sugg-h">Gone quiet · 30+ days</div>${quiet.slice(0,8).map(c=>suggRow(c,daysAgo(c.lastTouch)+'d since last touch')).join('')}`:''}
+    ${(!due.length&&!quiet.length)?'<div class="empty">Nothing surfacing right now — you\u2019re caught up. 🎉</div>':''}
   </div>
 
   <div class="card card-pad" style="margin-top:1rem">
@@ -4910,19 +4946,11 @@ function renderWeek(){
       <div>${toSched.length?toSched.slice(0,8).map(qiRow).join(''):'<div class="empty">Nothing to schedule. Reach into a warm path.</div>'}</div>
     </div>
     <div class="card card-pad">
-      <h3>✉️ Outreach queue <span class="ct">${out.length}</span></h3>
-      <div>${out.length?out.slice(0,10).map(qiRow).join(''):'<div class="empty">Queue empty. Open a target company and pick people to reach.</div>'}</div>
-    </div>
-    <div class="card card-pad">
-      <h3>⏰ Touchpoints due <span class="ct">${due.length}</span></h3>
-      <div>${due.length?due.slice(0,8).map(qiRow).join(''):'<div class="empty">Nothing due. Schedule next touches from contact cards.</div>'}</div>
-    </div>
-    <div class="card card-pad">
       <h3>🔥 Pipeline <span class="ct">${interviewing.length+warm.length} live</span></h3>
       <div>${(interviewing.concat(warm)).slice(0,10).map(co=>`
         <div class="queue-item" onclick="openCompany('${co.id}')" style="cursor:pointer">
           <div class="qi-main"><div class="qi-name">${esc(co.name)}</div>
-          <div class="qi-meta">${esc(co.targetFunction||co.category)}</div></div>
+          <div class="qi-meta">${esc(co.targetFunction||co.category||'')}</div></div>
           <span class="chip ${statusChip(co.status)}">${esc(co.status)}</span>
         </div>`).join('')||'<div class="empty">No live processes yet.</div>'}</div>
     </div>
@@ -4931,17 +4959,69 @@ function renderWeek(){
       <div>${chase.length?chase.slice(0,8).map(p=>{const via=p.introContactId?contact(p.introContactId):null;return `<div class="queue-item" onclick="openPersonFull('${p.id}')" style="cursor:pointer"><div class="qi-main"><div class="qi-name">${esc(p.name)} <span class="subtle">· ${esc(p.company)}</span></div><div class="qi-meta">${esc(p.title||'')}${via?' · via '+esc(via.name):' · need a path'}</div></div><span class="chip" style="font-size:.55rem">${esc(p.status)}</span></div>`;}).join(''):'<div class="empty">No active intros. Add leaders in Contacts → People to meet.</div>'}</div>
     </div>`;})()}
   </div>
-
-  ${staleStrong().length?`<div class="card card-pad" style="margin-top:1rem">
-    <h3>💤 Strong ties going cold <span class="ct">${staleStrong().length}</span></h3>
-    <div>${staleStrong().slice(0,6).map(c=>`
-      <div class="queue-item" onclick="openContact('${c.id}')" style="cursor:pointer">
-        <div class="qi-main"><div class="qi-name">${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span></div>
-        <div class="qi-meta">Last touch ${daysAgo(c.lastTouch)} days ago</div></div>
-        <span class="qi-act">Reconnect →</span></div>`).join('')}</div>
-  </div>`:''}
   `;
   renderGoals();
+}
+/* ---- Outreach plan + suggestions ---- */
+function addDays(d,n){const x=new Date((d||today())+'T00:00:00');x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
+function inPlan(cid){return (DB.weekly.plan||[]).some(x=>x.cid===cid);}
+function dueSoon(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.nextTouch && c.nextTouch<=lim && c.status!=='Do not pursue' && !inPlan(c.id)).sort((a,b)=>(a.nextTouch||'').localeCompare(b.nextTouch||''));}
+function goneQuiet(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.lastTouch && daysAgo(c.lastTouch)>=30 && c.status!=='Do not pursue' && !inPlan(c.id) && !(c.nextTouch && c.nextTouch<=lim)).sort((a,b)=>daysAgo(b.lastTouch)-daysAgo(a.lastTouch));}
+function dueWhy(c){if(!c.nextTouch)return '';return c.nextTouch<today()?'overdue · '+relDay(c.nextTouch):'due '+relDay(c.nextTouch);}
+function planDefaultAction(c){if(['Check in','Send update','Ask for intro','Schedule call'].includes(c.nextStep))return c.nextStep;if(c.lastTouch && daysAgo(c.lastTouch)>=30)return 'Reconnect';return 'Check in';}
+function planAdd(cid,action){DB.weekly.plan=DB.weekly.plan||[];if(DB.weekly.plan.some(x=>x.cid===cid)){toast('Already in your plan');return;}const c=contact(cid);if(!c)return;DB.weekly.plan.push({id:uid('pl'),cid,action:action||planDefaultAction(c),done:false});saveDB();renderWeek();toast('Added to plan');}
+function planRemove(id){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>x.id!==id);saveDB();renderWeek();}
+function planMove(id,dir){const a=DB.weekly.plan||[];const i=a.findIndex(x=>x.id===id);if(i<0)return;if(dir==='top'){if(i===0)return;const it=a.splice(i,1)[0];a.unshift(it);}else if(dir==='up'){if(i===0)return;const t=a[i-1];a[i-1]=a[i];a[i]=t;}else if(dir==='down'){if(i>=a.length-1)return;const t=a[i+1];a[i+1]=a[i];a[i]=t;}saveDB();renderWeek();}
+function planSetAction(id,v){const it=(DB.weekly.plan||[]).find(x=>x.id===id);if(it){it.action=v;saveDB();}}
+function planToggleDone(id){const it=(DB.weekly.plan||[]).find(x=>x.id===id);if(!it)return;it.done=!it.done;if(it.done&&!it.logged){const c=contact(it.cid);if(c){c.touchpoints=c.touchpoints||[];c.touchpoints.push({date:today(),kind:'outreach',note:it.action||'Outreach'});c.lastTouch=today();c.nextTouch=addDays(today(),30);}it.logged=true;}saveDB();renderWeek();toast(it.done?'Logged ✓ — reminder set +30 days':'Marked not done');}
+function clearDonePlan(){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>!x.done);saveDB();renderWeek();toast('Cleared completed');}
+function planRow(it,i){
+  const c=contact(it.cid);if(!c)return '';
+  const days=daysAgo(c.lastTouch);
+  const why = (c.nextTouch&&c.nextTouch<today())?'<span style="color:var(--amber)">overdue '+relDay(c.nextTouch)+'</span>'
+    : (c.nextTouch?'due '+relDay(c.nextTouch):(days!=null?days+'d since last touch':'no touch logged'));
+  return `<div class="plan-item ${it.done?'done':''}">
+    <div class="plan-reorder">
+      <button class="mini" title="To top" onclick="planMove('${it.id}','top')">⤒</button>
+      <button class="mini" title="Up" onclick="planMove('${it.id}','up')">↑</button>
+      <button class="mini" title="Down" onclick="planMove('${it.id}','down')">↓</button>
+    </div>
+    <div class="plan-check ${it.done?'on':''}" title="Mark done" onclick="planToggleDone('${it.id}')">${it.done?'✓':(i+1)}</div>
+    <div class="plan-main">
+      <div class="qi-name" onclick="openContact('${c.id}')" style="cursor:pointer">${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span></div>
+      <div class="qi-meta">${esc(c.title||c.roleType||'')} · ${why}</div>
+      <div class="plan-actions">
+        <select class="inline-sel" onchange="planSetAction('${it.id}',this.value)">${PLAN_ACTIONS.map(a=>`<option ${it.action===a?'selected':''}>${a}</option>`).join('')}</select>
+        <button class="btn ghost sm" id="planDraftBtn_${it.id}" onclick="planDraft('${it.id}')">✍ Draft</button>
+        <button class="linkout" onclick="planRemove('${it.id}')">remove</button>
+      </div>
+      <div id="planDraftOut_${it.id}" style="margin-top:.4rem"></div>
+    </div>
+  </div>`;
+}
+function suggRow(c,why){
+  return `<div class="queue-item">
+    <div class="qi-main" onclick="openContact('${c.id}')" style="cursor:pointer">
+      <div class="qi-name">${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span></div>
+      <div class="qi-meta">${esc(c.title||c.roleType||'')}${why?' · '+why:''}</div>
+    </div>
+    <button class="btn ghost sm" onclick="event.stopPropagation();planAdd('${c.id}')">+ Plan</button>
+  </div>`;
+}
+async function planDraft(id){
+  const it=(DB.weekly.plan||[]).find(x=>x.id===id);if(!it)return;
+  const c=contact(it.cid);if(!c)return;
+  if(!AI.key()){goTab('settings');toast('Add your Anthropic key in Settings');return;}
+  const btn=$('#planDraftBtn_'+id);if(btn){btn.innerHTML='<span class="spinner" style="border-color:rgba(0,0,0,.2);border-top-color:var(--accent)"></span> Drafting…';btn.disabled=true;}
+  const out=$('#planDraftOut_'+id);
+  try{
+    const co=DB.companies.find(x=>x.name===c.company)||null;
+    const msg=await AI.draftMessage(c,co,{action:it.action});
+    if(out)out.innerHTML=`<textarea class="ta" style="min-height:130px">${esc(msg)}</textarea>
+      <div style="margin-top:.4rem"><button class="btn sm" onclick="navigator.clipboard.writeText(this.parentElement.previousElementSibling.value);toast('Copied')">Copy</button>
+      <button class="btn ghost sm" style="margin-left:.4rem" onclick="planDraft('${id}')">↻ Redraft</button></div>`;
+  }catch(e){if(out)out.innerHTML=`<div class="empty" style="color:var(--red)">Couldn\u2019t draft: ${esc(e.message)}</div>`;}
+  finally{if(btn){btn.disabled=false;btn.innerHTML='✍ Draft';}}
 }
 function qiRow(c){
   const scheduled=c.nextStep==='Call scheduled'&&c.callDate;
@@ -5182,7 +5262,7 @@ function paintCompanyDrawer(co){
       <div class="dr-sec-h">Settings</div>
       <div class="field-row">
         <div class="field"><label>Tier</label><select id="coTier" onchange="setCoSelect('tier',this.value)"><option ${co.tier==='A'?'selected':''}>A</option><option ${co.tier==='B'?'selected':''}>B</option><option ${co.tier==='C'?'selected':''}>C</option></select></div>
-        <div class="field"><label>Status</label><input id="coStatus" value="${esc(co.status)}" onchange="setCoSelect('status',this.value)"></div>
+        <div class="field"><label>Status</label><select id="coStatus" class="inline-sel" onchange="setCoSelect('status',this.value)">${COMPANY_STATUS.map(s=>`<option ${co.status===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
       </div>
       <div class="field"><label>Careers / role URL</label><input value="${esc(co.careersSite)}" onchange="setCoSelect('careersSite',this.value)" placeholder="https://…"></div>
       <div class="row-actions" style="margin-top:.4rem">
@@ -5314,17 +5394,90 @@ function addAllResearch(){const {people}=window._research;people.forEach((_,i)=>
    CONTACTS  (CRM)
    ============================================================ */
 let cFilter='all', cSearch='', cSort='manual', cDir='desc', cRenderedIds=[], cMode='network';
+let DIR=[]; let dirQ='', dirBoardOnly=false, dirRelevant=false;
+function loadDir(){try{DIR=JSON.parse(localStorage.getItem('hq_dir_v1')||'[]');}catch(e){DIR=[];}if(!Array.isArray(DIR))DIR=[];}
+loadDir();
 function renderContacts(){
   const p=$('#panel-contacts');
   p.innerHTML=`
   <div class="mode-tabs">
-    <button class="mode-b ${cMode==='network'?'on':''}" onclick="setCMode('network')">◍ My network <span class="mode-ct">${DB.contacts.length}</span></button>
+    <button class="mode-b ${cMode==='network'?'on':''}" onclick="setCMode('network')">◍ My network <span class="mode-ct" id="netCount">${DB.contacts.length}</span></button>
     <button class="mode-b ${cMode==='meet'?'on':''}" onclick="setCMode('meet')">★ People to meet <span class="mode-ct">${(DB.people||[]).length}</span></button>
+    <button class="mode-b ${cMode==='directory'?'on':''}" onclick="setCMode('directory')">🗂 Directory <span class="mode-ct">${DIR.length}</span></button>
   </div>
   <div id="cSub"></div>`;
-  if(cMode==='meet')renderPeople(); else renderNetwork();
+  if(cMode==='meet')renderPeople(); else if(cMode==='directory')renderDirectory(); else renderNetwork();
 }
 function setCMode(m){cMode=m;renderContacts();}
+function renderDirectory(){
+  const sub=$('#cSub');
+  if(!DIR.length){
+    sub.innerHTML=`<div class="empty" style="padding:1.5rem;text-align:center">
+      Your full LinkedIn connections aren\u2019t loaded on this device yet.<br>
+      <span class="subtle">Go to <b>Settings → Import LinkedIn connections</b> and drop your <code>connections.csv</code>. The whole list is cached <b>locally in this browser</b> (not synced), so you can search all of it right here.</span>
+      <div style="margin-top:.9rem"><button class="btn sm" onclick="goTab('settings')">Open Settings</button></div></div>`;
+    return;
+  }
+  window._dirBoardSet=new Set(DB.companies.map(co=>coCanon(co.name)).filter(Boolean));
+  sub.innerHTML=`
+  <div class="ctrlbar">
+    <div class="searchbox"><span class="ic">⌕</span><input id="dirSearch" placeholder="Search ${DIR.length} connections by name, company, or title…" value="${esc(dirQ)}"></div>
+    <div class="filterset">
+      <button class="fb ${dirBoardOnly?'on':''}" id="dirBoardBtn">My board companies</button>
+      <button class="fb ${dirRelevant?'on':''}" id="dirRelBtn">Partner/mktg/growth/BD</button>
+    </div>
+  </div>
+  <div class="subtle" style="font-size:.78rem;margin:-.3rem 0 .55rem">Cached locally on this device — not synced. Re-import your CSV in Settings to refresh. Adding someone copies them into Contacts (then Push &amp; Pull to sync).</div>
+  <div id="dirBody"></div>`;
+  $('#dirSearch').oninput=e=>{dirQ=e.target.value;paintDirectory();};
+  $('#dirBoardBtn').onclick=()=>{dirBoardOnly=!dirBoardOnly;renderDirectory();};
+  $('#dirRelBtn').onclick=()=>{dirRelevant=!dirRelevant;renderDirectory();};
+  paintDirectory();
+}
+function dirMatches(d){
+  const q=dirQ.trim().toLowerCase();
+  if(q && !((d.name||'').toLowerCase().includes(q)||(d.company||'').toLowerCase().includes(q)||(d.title||'').toLowerCase().includes(q)))return false;
+  if(dirBoardOnly && !(window._dirBoardSet&&window._dirBoardSet.has(coCanon(d.company))))return false;
+  if(dirRelevant && !liRelevant(d.title))return false;
+  return true;
+}
+function paintDirectory(){
+  const body=$('#dirBody');if(!body)return;
+  if(!dirQ.trim() && !dirBoardOnly && !dirRelevant){
+    body.innerHTML=`<div class="empty" style="padding:1.2rem;text-align:center">Type a name, company, or title to search your ${DIR.length} connections — or tap a filter above.</div>`;
+    return;
+  }
+  const have=new Set(DB.contacts.map(c=>canonName(c.name)));
+  const all=DIR.filter(dirMatches);
+  const CAP=150,shown=all.slice(0,CAP);
+  let html=`<div class="subtle" style="font-size:.8rem;margin-bottom:.4rem">${all.length} ${all.length===1?'match':'matches'}${all.length>CAP?` · showing first ${CAP}`:''}</div><table class="tbl"><tbody>`;
+  shown.forEach(d=>{
+    const inC=have.has(canonName(d.name));
+    const onBoard=window._dirBoardSet&&window._dirBoardSet.has(coCanon(d.company));
+    html+=`<tr>
+      <td><div style="font-weight:600">${esc(d.name)}</div><div class="subtle" style="font-size:.78rem">${esc(d.title||'—')}${d.company?' · '+esc(d.company):''}${onBoard?' <span class="chip slate" style="font-size:.5rem">on board</span>':''}</div></td>
+      <td style="text-align:right;white-space:nowrap">${inC?'<span class="chip green" style="font-size:.55rem">✓ in contacts</span>':`<button class="btn ghost sm" onclick="addFromDirectory('${d.id}')">+ Add</button>`}</td>
+    </tr>`;
+  });
+  html+='</tbody></table>';
+  body.innerHTML=html;
+}
+function addFromDirectory(id){
+  const d=DIR.find(x=>x.id===id);if(!d)return;
+  if(DB.contacts.some(c=>canonName(c.name)===canonName(d.name))){toast('Already in contacts');paintDirectory();return;}
+  const ck=coCanon(d.company);const onBoard=DB.companies.find(co=>coCanon(co.name)===ck);
+  const comp=onBoard?onBoard.name:d.company;
+  const sn=guessSeniority(d.title);
+  const senior=/director|vice president|\bvp\b|head|chief|\bgm\b|general manager|svp|evp|principal/i.test(d.title||'');
+  const rt=/recruit|talent/i.test(d.title||'')?'Recruiter':(senior?'Hiring Manager':'Connector');
+  const c={id:uid('c'),name:d.name,company:comp,title:d.title||'',seniority:sn.label,srank:sn.rank,strength:'Weak',
+    roleType:rt,roleRaw:'LinkedIn directory',lastTouch:'',nextTouch:'',status:'New',nextStep:'Check in',
+    email:'',notes:'LinkedIn directory'+(comp?' · '+comp:'')+(d.conn?' · connected '+d.conn:''),linkedinUrl:d.url||'',touchpoints:[],isTarget:false,source:'linkedin-dir'};
+  DB.contacts=DB.contacts.concat([c]);saveDB();
+  const nc=$('#netCount');if(nc)nc.textContent=DB.contacts.length;
+  toast('✓ Added '+d.name+' — Push & Pull to sync');
+  paintDirectory();
+}
 function renderNetwork(){
   const sub=$('#cSub');
   const sorts=[['manual','⠿ My order'],['lastTouch','Last touch'],['name','Name'],['roleType','Role'],['strength','Tie'],['status','Status']];
@@ -6068,6 +6221,14 @@ function importLinkedIn(){
   const hdr=rows[hi].map(x=>(x||'').trim().toLowerCase());
   const ci={first:hdr.indexOf('first name'),last:hdr.indexOf('last name'),url:hdr.indexOf('url'),company:hdr.indexOf('company'),pos:hdr.indexOf('position'),conn:hdr.indexOf('connected on')};
   if(ci.first<0||ci.company<0){toast('That doesn\u2019t look like a LinkedIn connections export');return;}
+  // cache the FULL directory locally (browser-only, not synced) for the Directory search
+  const dir=[];
+  for(let r=hi+1;r<rows.length;r++){
+    const row=rows[r];if(!row||!row.length)continue;
+    const nm=(((row[ci.first]||'')+' '+(row[ci.last]||'')).trim());if(!nm)continue;
+    dir.push({id:'d'+r,name:nm,title:(ci.pos>-1?row[ci.pos]||'':'').trim(),company:(ci.company>-1?row[ci.company]||'':'').trim(),url:(ci.url>-1?row[ci.url]||'':'').trim(),conn:(ci.conn>-1?row[ci.conn]||'':'').trim()});
+  }
+  DIR=dir;try{localStorage.setItem('hq_dir_v1',JSON.stringify(dir));}catch(e){}
   const targets={};DB.companies.forEach(co=>{if(co.tier==='A'||co.tier==='B'){const k=coCanon(co.name);if(k)targets[k]=co.name;}});
   const have=new Set(DB.contacts.map(c=>canonName(c.name)));
   const haveUrl=new Set(DB.contacts.map(c=>(c.linkedinUrl||'').replace(/\/+$/,'')).filter(Boolean));
