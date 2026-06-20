@@ -1,0 +1,22 @@
+name: Job scanner
+
+# Mon & Thu at 13:00 UTC ≈ 6am Pacific (within an hour year-round across DST).
+# You can also run it any time from the Actions tab via "Run workflow".
+on:
+  schedule:
+    - cron: '0 13 * * 1,4'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Scan target companies for new roles
+        env:
+          SYNC_URL: ${{ secrets.HQ_SYNC_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node scan/scan-jobs.mjs
