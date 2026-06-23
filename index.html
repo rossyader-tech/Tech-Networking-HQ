@@ -79,6 +79,7 @@ main{max-width:1180px;margin:0 auto;padding:1.2rem 1.1rem 5rem}
 .chip.red{background:var(--red-bg);color:var(--red);border-color:transparent}
 .chip.slate{background:var(--slate-bg);color:var(--slate);border-color:transparent}
 .chip.accent{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent}
+.chip.indigo{background:#ECEAFE;color:#4F46E5;border-color:transparent}
 .empty{color:var(--muted);font-size:.85rem;padding:1.4rem;text-align:center;border:1px dashed var(--line);border-radius:var(--r);background:var(--surface2)}
 .row-actions{display:flex;gap:.4rem;flex-wrap:wrap}
 
@@ -4324,7 +4325,7 @@ const LS_MODEL= 'hq_model_v1';
 
 /* ---------- fixed vocabularies ---------- */
 const CONTACT_STATUS = ['New','Reaching out','Active','Nurture','Activated','Dormant','Do not pursue'];
-const NEXT_STEPS = ['Check in','Schedule call','Call scheduled','Send update','Ask for intro','Wait for reply','Nothing right now','Other…'];
+const NEXT_STEPS = ['Check in','Schedule call','Call scheduled','Interview scheduled','Send update','Ask for intro','Wait for reply','Nothing right now','Other…'];
 const PEOPLE_STAGES = ['Identified','Need a path','Intro requested','Intro made','In conversation','Building','Parked'];
 const PEOPLE_ACTIVE = ['Need a path','Intro requested','Intro made','In conversation'];
 const JOB_STAGES = ['Found','Researching','Networking in','Referral secured','Recruiter screen','Hiring manager','Onsite/Panel','Offer','Closed','Not a fit'];
@@ -4767,7 +4768,7 @@ function renderContactFull(c){
     <span class="chip"><span class="dot-str str-${c.strength}"></span> ${esc(c.strength)} tie</span>
     <select class="inline-sel" onchange="quickSetContact('${c.id}','status',this.value)">${CONTACT_STATUS.map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select>
     <select class="inline-sel" onchange="quickSetNextStep('${c.id}',this.value)">${NEXT_STEPS.map(s=>`<option ${c.nextStep===s?'selected':''}>${s}</option>`).join('')}</select>
-    ${c.nextStep==='Call scheduled'?`<button class="chip accent" onclick="openCallPicker('${c.id}')">📅 ${c.callDate?esc(fmtCallWhen(c)):'set date'} ✎</button>`:''}
+    ${isScheduled(c)?`<button class="chip ${isInterview(c)?'indigo':'accent'}" onclick="openCallPicker('${c.id}')">${isInterview(c)?'🎯':'📅'} ${c.callDate?esc(fmtCallWhen(c)):'set date'} ✎</button>`:''}
     ${c.email?`<a class="chip" href="mailto:${esc(c.email)}">✉ ${esc(c.email)}</a>`:''}
   </div>
   <div class="fv-grid">
@@ -4831,6 +4832,8 @@ function moveToPeople(id){
 function quickSetContact(id,f,v){const c=contact(id);c[f]=v;if(f==='status'){/*recolor*/}saveDB();paintContacts&&paintContacts();renderWeek();toast('Saved');if(location.hash.startsWith('#contact'))renderContactFull(c);}
 function fmtTime(t){if(!t)return '';const p=t.split(':');let h=parseInt(p[0],10);const m=p[1]||'00';const ap=h<12?'AM':'PM';const hh=((h%12)||12);return hh+':'+String(m).padStart(2,'0')+' '+ap;}
 function fmtCallWhen(c){if(!c.callDate)return '';return fmtDate(c.callDate)+(c.callTime?' · '+fmtTime(c.callTime):'');}
+function isScheduled(c){return c.nextStep==='Call scheduled'||c.nextStep==='Interview scheduled';}
+function isInterview(c){return c.nextStep==='Interview scheduled';}
 function openCallPicker(id){
   const c=contact(id);if(!c)return;
   closeCallPicker();
@@ -4839,7 +4842,7 @@ function openCallPicker(id){
   wrap.innerHTML=`
     <div class="dt-scrim" onclick="closeCallPicker()"></div>
     <div class="dt-card">
-      <div class="dt-h">📅 Schedule call — ${esc(c.name)}</div>
+      <div class="dt-h">${isInterview(c)?'🎯 Schedule interview':'📅 Schedule call'} — ${esc(c.name)}</div>
       <div class="field"><label>Date</label><input type="date" id="dtDate" value="${esc(cur)}"></div>
       <div class="field" id="dtTimeWrap"><label>Time</label><input type="time" id="dtTime" value="${esc(curT)}"></div>
       <label class="dt-allday"><input type="checkbox" id="dtAllDay" ${curT?'':'checked'} onchange="toggleAllDay()"> No specific time yet</label>
@@ -4858,7 +4861,7 @@ function saveCallPicker(id){
   if(!d){toast('Pick a date');return;}
   const allday=$('#dtAllDay')&&$('#dtAllDay').checked;
   c.callDate=d;c.callTime=allday?'':(($('#dtTime')&&$('#dtTime').value)||'');
-  c.nextStep='Call scheduled';c.nextTouch=d;
+  if(c.nextStep!=='Interview scheduled')c.nextStep='Call scheduled';c.nextTouch=d;
   saveDB();closeCallPicker();
   paintContacts&&paintContacts();renderWeek();
   if(location.hash.startsWith('#contact'))renderContactFull(c);
@@ -4866,7 +4869,7 @@ function saveCallPicker(id){
   toast('📅 Call set — '+fmtCallWhen(c));
 }
 function changeCallDate(id){openCallPicker(id);}
-function quickSetNextStep(id,v){const c=contact(id);if(v==='Other…'){const o=prompt('Next step',c.nextStepOther||'');c.nextStepOther=(o||'').trim();}c.nextStep=v;saveDB();if(v==='Call scheduled'){openCallPicker(id);return;}paintContacts&&paintContacts();renderWeek();toast('Saved');if(location.hash.startsWith('#contact'))renderContactFull(c);}
+function quickSetNextStep(id,v){const c=contact(id);if(v==='Other…'){const o=prompt('Next step',c.nextStepOther||'');c.nextStepOther=(o||'').trim();}c.nextStep=v;saveDB();if(v==='Call scheduled'||v==='Interview scheduled'){openCallPicker(id);return;}paintContacts&&paintContacts();renderWeek();toast('Saved');if(location.hash.startsWith('#contact'))renderContactFull(c);}
 function remindIn(id,days){const c=contact(id);c.nextTouch=addDays(today(),days);saveDB();toast('Reminder set for '+fmtDate(c.nextTouch));renderWeek();if(location.hash.startsWith('#contact'))renderContactFull(c);}
 function remindPick(id){const c=contact(id);const v=prompt('Reminder date (YYYY-MM-DD)',c.nextTouch||today());if(v!==null){c.nextTouch=v.trim();saveDB();renderWeek();if(location.hash.startsWith('#contact'))renderContactFull(c);}}
 function editContactFull(id){const c=contact(id);openContact(id);} 
@@ -4880,7 +4883,10 @@ function callsInPlay(){return DB.contacts.filter(c=>c.nextStep==='Schedule call'
   if(aS!==bS)return aS-bS; // scheduled (with a date) first
   return (a.callDate||'9999').localeCompare(b.callDate||'9999');
 });}
-function upcomingCalls(){return DB.contacts.filter(c=>c.nextStep==='Call scheduled'&&c.callDate).sort((a,b)=>(a.callDate||'').localeCompare(b.callDate||''));}
+function upcomingCalls(){return DB.contacts.filter(c=>isScheduled(c)&&c.callDate).sort((a,b)=>{
+  const d=(a.callDate||'9999').localeCompare(b.callDate||'9999');if(d)return d;
+  return (a.callTime||'99:99').localeCompare(b.callTime||'99:99');
+});}
 function callsToSchedule(){return DB.contacts.filter(c=>c.nextStep==='Schedule call');}
 function relDay(d){
   if(!d)return '';
@@ -4894,13 +4900,16 @@ function relDay(d){
 }
 function callRow(c){
   const past=c.callDate&&c.callDate<today();
+  const intv=isInterview(c);
   const when=relDay(c.callDate)+(c.callTime?' · '+fmtTime(c.callTime):'');
+  const chipCls=past?'amber':(intv?'indigo':'green');
+  const icon=intv?'🎯':'📅';
   return `<div class="queue-item">
     <div class="qi-main" onclick="openContact('${c.id}')" style="cursor:pointer">
-      <div class="qi-name">${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span></div>
+      <div class="qi-name">${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span>${intv?' <span class="chip indigo" style="font-size:.5rem;vertical-align:middle;letter-spacing:.04em">INTERVIEW</span>':''}</div>
       <div class="qi-meta">${esc(c.title||c.roleType||'')}${past?' · <span style="color:#9a6700">log the outcome</span>':''}</div>
     </div>
-    <span class="chip ${past?'amber':'green'}" title="${esc(c.callDate||'')}">📅 ${when}</span>
+    <span class="chip ${chipCls}" title="${esc(c.callDate||'')}">${icon} ${when}</span>
   </div>`;
 }
 function outreachQueue(){return DB.contacts.filter(c=>['Check in','Send update','Ask for intro'].includes(c.nextStep) || c.status==='Reaching out').sort((a,b)=>{
@@ -5058,7 +5067,7 @@ async function planDraft(id){
   finally{if(btn){btn.disabled=false;btn.innerHTML='✍ Draft';}}
 }
 function qiRow(c){
-  const scheduled=c.nextStep==='Call scheduled'&&c.callDate;
+  const scheduled=isScheduled(c)&&c.callDate;
   const meta = scheduled ? '📅 '+fmtCallWhen(c) : (c.nextTouch?'due '+fmtDate(c.nextTouch):'');
   return `<div class="queue-item">
     <div class="qi-main" onclick="openContact('${c.id}')" style="cursor:pointer">
@@ -5711,7 +5720,7 @@ function paintContacts(){
     <td data-l="Tie"><select class="inline-sel" onchange="quickSetContact('${c.id}','strength',this.value)">${['Strong','Medium','Weak','Unknown'].map(s=>`<option ${c.strength===s?'selected':''}>${s}</option>`).join('')}</select></td>
     <td data-l="Status"><select class="inline-sel" onchange="quickSetContact('${c.id}','status',this.value)">${CONTACT_STATUS.map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
     <td data-l="Last touch">${c.lastTouch?fmtDate(c.lastTouch)+' <span class="subtle">('+daysAgo(c.lastTouch)+'d)</span>':'—'}</td>
-    <td data-l="Next step"><select class="inline-sel" onchange="quickSetNextStep('${c.id}',this.value)">${NEXT_STEPS.map(s=>`<option ${c.nextStep===s?'selected':''}>${s}</option>`).join('')}</select>${c.nextStep==='Call scheduled'?` <button class="chip accent" style="font-size:.5rem" onclick="openCallPicker('${c.id}')">📅 ${c.callDate?esc(fmtCallWhen(c)):'set'}</button>`:(c.nextTouch&&c.nextTouch<=today()?' <span class="chip amber" style="font-size:.5rem">due</span>':'')}</td>
+    <td data-l="Next step"><select class="inline-sel" onchange="quickSetNextStep('${c.id}',this.value)">${NEXT_STEPS.map(s=>`<option ${c.nextStep===s?'selected':''}>${s}</option>`).join('')}</select>${isScheduled(c)?` <button class="chip ${isInterview(c)?'indigo':'accent'}" style="font-size:.5rem" onclick="openCallPicker('${c.id}')">${isInterview(c)?'🎯':'📅'} ${c.callDate?esc(fmtCallWhen(c)):'set'}</button>`:(c.nextTouch&&c.nextTouch<=today()?' <span class="chip amber" style="font-size:.5rem">due</span>':'')}</td>
   </tr>`;}).join('');
   if(manual)wireContactDrag(body);
 }
@@ -6060,7 +6069,7 @@ function paintContactDrawer(c){
       <div class="field"><label>Next step</label><select onchange="setNextStepDrawer(this.value)">${NEXT_STEPS.map(s=>`<option ${c.nextStep===s?'selected':''}>${s}</option>`).join('')}</select></div>
     </div>
     ${c.nextStep==='Other…'?`<div class="field"><label>Next step (custom)</label><input value="${esc(c.nextStepOther||'')}" onchange="setC('nextStepOther',this.value)"></div>`:''}
-    ${c.nextStep==='Call scheduled'?`<div class="field"><label>Call date &amp; time</label><button class="btn ghost sm" type="button" onclick="openCallPicker('${c.id}')">📅 ${c.callDate?esc(fmtCallWhen(c)):'Pick date &amp; time'} ✎</button></div>`:''}
+    ${isScheduled(c)?`<div class="field"><label>${isInterview(c)?'Interview':'Call'} date &amp; time</label><button class="btn ghost sm" type="button" onclick="openCallPicker('${c.id}')">${isInterview(c)?'🎯':'📅'} ${c.callDate?esc(fmtCallWhen(c)):'Pick date &amp; time'} ✎</button></div>`:''}
     <div class="field-row">
       <div class="field"><label>Company</label><input value="${esc(c.company)}" onchange="setC('company',this.value)"></div>
       <div class="field"><label>Title</label><input value="${esc(c.title)}" onchange="setCTitle(this.value)"></div>
