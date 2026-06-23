@@ -4379,10 +4379,13 @@ function migrateJob(j){
 const $  = s => document.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-const today = ()=>new Date().toISOString().slice(0,10);
+const PT_TZ='America/Los_Angeles';
+function ptDate(dt){return new Intl.DateTimeFormat('en-CA',{timeZone:PT_TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(dt||new Date());}
+const ymdUTC=s=>{const p=String(s).split('-').map(Number);return Date.UTC(p[0],(p[1]||1)-1,p[2]||1);};
+const today = ()=>ptDate();
 const uid = p=> (p||'x')+'_'+Math.random().toString(36).slice(2,10);
-function fmtDate(d){if(!d)return '';const t=new Date(d+'T00:00:00');if(isNaN(t))return d;return t.toLocaleDateString('en-US',{month:'short',day:'numeric'});}
-function daysAgo(d){if(!d)return null;const t=new Date(d+'T00:00:00');if(isNaN(t))return null;return Math.round((Date.now()-t)/864e5);}
+function fmtDate(d){if(!d)return '';const p=String(d).split('-').map(Number);if(!p[0])return d;return new Date(Date.UTC(p[0],p[1]-1,p[2])).toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'});}
+function daysAgo(d){if(!d)return null;const p=String(d).split('-').map(Number);if(!p[0])return null;return Math.round((ymdUTC(today())-ymdUTC(d))/864e5);}
 function initials(n){return (n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase();}
 function canonName(n){return (n||'').trim().toLowerCase();}
 function toast(msg,ms){const t=$('#toast');t.innerHTML=msg;t.classList.add('on');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),ms||2200);}
@@ -4864,7 +4867,7 @@ function saveCallPicker(id){
 }
 function changeCallDate(id){openCallPicker(id);}
 function quickSetNextStep(id,v){const c=contact(id);if(v==='Other…'){const o=prompt('Next step',c.nextStepOther||'');c.nextStepOther=(o||'').trim();}c.nextStep=v;saveDB();if(v==='Call scheduled'){openCallPicker(id);return;}paintContacts&&paintContacts();renderWeek();toast('Saved');if(location.hash.startsWith('#contact'))renderContactFull(c);}
-function remindIn(id,days){const c=contact(id);const d=new Date();d.setDate(d.getDate()+days);c.nextTouch=d.toISOString().slice(0,10);saveDB();toast('Reminder set for '+fmtDate(c.nextTouch));renderWeek();if(location.hash.startsWith('#contact'))renderContactFull(c);}
+function remindIn(id,days){const c=contact(id);c.nextTouch=addDays(today(),days);saveDB();toast('Reminder set for '+fmtDate(c.nextTouch));renderWeek();if(location.hash.startsWith('#contact'))renderContactFull(c);}
 function remindPick(id){const c=contact(id);const v=prompt('Reminder date (YYYY-MM-DD)',c.nextTouch||today());if(v!==null){c.nextTouch=v.trim();saveDB();renderWeek();if(location.hash.startsWith('#contact'))renderContactFull(c);}}
 function editContactFull(id){const c=contact(id);openContact(id);} 
 
@@ -4881,7 +4884,7 @@ function upcomingCalls(){return DB.contacts.filter(c=>c.nextStep==='Call schedul
 function callsToSchedule(){return DB.contacts.filter(c=>c.nextStep==='Schedule call');}
 function relDay(d){
   if(!d)return '';
-  const diff=Math.round((new Date(d+'T00:00:00')-new Date(today()+'T00:00:00'))/86400000);
+  const diff=Math.round((ymdUTC(d)-ymdUTC(today()))/86400000);
   if(diff===0)return 'Today';
   if(diff===1)return 'Tomorrow';
   if(diff===-1)return 'Yesterday';
@@ -4920,7 +4923,7 @@ function renderWeek(){
   p.innerHTML=`
   <div class="brief">
     <button class="brief-edit" onclick="editFocus()">edit focus</button>
-    <div class="eyebrow">Week of ${fmtDate(w.weekOf)||fmtDate(today())} · ${new Date().toLocaleDateString('en-US',{weekday:'long'})}</div>
+    <div class="eyebrow">Week of ${fmtDate(w.weekOf)||fmtDate(today())} · ${new Date().toLocaleDateString('en-US',{timeZone:PT_TZ,weekday:'long'})}</div>
     <h2>Where your hours go</h2>
     <div class="focus">${esc(w.focus)||'Set this week\u2019s focus — what would make the week a win?'}</div>
     <div class="kpis">
@@ -4994,7 +4997,7 @@ function renderOutreach(){
   `;
 }
 /* ---- Outreach plan + suggestions ---- */
-function addDays(d,n){const x=new Date((d||today())+'T00:00:00');x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
+function addDays(d,n){const x=new Date(ymdUTC(d||today()));x.setUTCDate(x.getUTCDate()+n);return x.toISOString().slice(0,10);}
 function inPlan(cid){return (DB.weekly.plan||[]).some(x=>x.cid===cid);}
 function dueSoon(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.nextTouch && c.nextTouch<=lim && c.status!=='Do not pursue' && !inPlan(c.id)).sort((a,b)=>(a.nextTouch||'').localeCompare(b.nextTouch||''));}
 function goneQuiet(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.lastTouch && daysAgo(c.lastTouch)>=30 && c.status!=='Do not pursue' && !inPlan(c.id) && !(c.nextTouch && c.nextTouch<=lim)).sort((a,b)=>daysAgo(b.lastTouch)-daysAgo(a.lastTouch));}
