@@ -128,6 +128,21 @@ main{max-width:1180px;margin:0 auto;padding:1.2rem 1.1rem 5rem}
 .goal .gt:focus{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
 .goal .del{color:var(--faint);font-size:.9rem;opacity:0;transition:opacity .12s}
 .goal:hover .del{opacity:1}
+.goal-reorder{display:flex;flex-direction:column;gap:2px;flex:0 0 auto}
+.goal-reorder .mini{width:20px;height:15px;line-height:1;border:1px solid var(--line);background:var(--surface);border-radius:4px;cursor:pointer;font-size:.62rem;color:var(--muted);padding:0}
+.goal-reorder .mini:hover{border-color:var(--accent);color:var(--accent)}
+.goal-due-wrap{display:flex;align-items:center;gap:.35rem;flex:0 0 auto;margin-left:auto}
+.goal-due{font-size:.72rem;padding:.15rem .3rem;border:1px solid var(--line);border-radius:5px;color:var(--muted);background:var(--surface);font-family:inherit;cursor:pointer}
+.goal.overdue .goal-due{border-color:var(--amber);color:var(--amber)}
+.plan-add{position:relative;margin:-.1rem 0 .7rem}
+.plan-add input{width:100%;padding:.5rem .7rem;border:1px solid var(--line);border-radius:var(--r-sm);outline:none;font-family:inherit;font-size:.86rem}
+.plan-add input:focus{border-color:var(--accent)}
+.plan-add-results{position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);box-shadow:0 6px 20px rgba(0,0,0,.12);margin-top:2px;display:none;max-height:250px;overflow:auto}
+.plan-add-item{padding:.5rem .7rem;cursor:pointer;font-size:.84rem;border-bottom:1px solid var(--line2)}
+.plan-add-item:last-child{border-bottom:none}
+.plan-add-item:hover{background:var(--accent-soft)}
+.sugg-x{width:24px;height:24px;border:1px solid var(--line);background:var(--surface);border-radius:6px;color:var(--muted);cursor:pointer;flex:0 0 auto;font-size:.72rem}
+.sugg-x:hover{border-color:var(--amber);color:var(--amber)}
 .goal-add{display:flex;gap:.5rem;margin-top:.6rem}
 .goal-add input{flex:1;padding:.45rem .6rem;border:1px solid var(--line);border-radius:var(--r-sm);outline:none}
 .goal-add input:focus{border-color:var(--accent)}
@@ -5024,7 +5039,7 @@ function renderWeek(){
 function renderOutreach(){
   const w=DB.weekly; w.plan=w.plan||[];
   const plan=w.plan, planActive=plan.filter(x=>!x.done), planDone=plan.filter(x=>x.done);
-  const due=dueSoon(), quiet=goneQuiet();
+  const sugg=suggestions();
   const p=$('#panel-outreach');
   p.innerHTML=`
   <div class="brief">
@@ -5036,15 +5051,16 @@ function renderOutreach(){
   <div class="card card-pad" style="margin-top:1rem">
     <h3>📨 Outreach plan <span class="ct">${planActive.length} to send${planDone.length?` · ${planDone.length} done`:''}</span></h3>
     <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .6rem">Your order, top to bottom — #1 is the next one you\u2019ll send. Reorder with ⤒ ↑ ↓. Tap the number to mark it done (logs the touch, resets the 30-day reminder).${planDone.length?` · <button class="linkout" onclick="clearDonePlan()">Clear done</button>`:''}</div>
-    <div id="planList">${plan.length?plan.map((it,i)=>planRow(it,i)).join(''):'<div class="empty">Nothing queued yet. Add people from <b>Suggested</b> below, or with “📨 Add to plan” on any contact.</div>'}</div>
+    <div class="plan-add"><input id="planAddSearch" placeholder="➕ Add anyone to your plan — type a name or company…" autocomplete="off" oninput="planAddSearch(this.value)"><div id="planAddResults" class="plan-add-results"></div></div>
+    <div id="planList">${plan.length?plan.map((it,i)=>planRow(it,i)).join(''):'<div class="empty">Nothing queued yet. Add anyone with the box above, from <b>Suggested</b> below, or with “📨 Add to plan” on any contact.</div>'}</div>
   </div>
 
   <div class="card card-pad" style="margin-top:1rem">
-    <h3>💡 Suggested — add to plan <span class="ct">${due.length+quiet.length}</span></h3>
-    <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .5rem">Tap <b>+ Plan</b> to drop someone into your list above, in whatever order you want.</div>
-    ${due.length?`<div class="sugg-h">Due / overdue</div>${due.slice(0,10).map(c=>suggRow(c,dueWhy(c))).join('')}`:''}
-    ${quiet.length?`<div class="sugg-h">Gone quiet · 30+ days</div>${quiet.slice(0,10).map(c=>suggRow(c,daysAgo(c.lastTouch)+'d since last touch')).join('')}`:''}
-    ${(!due.length&&!quiet.length)?'<div class="empty">Nothing surfacing right now — you\u2019re caught up. 🎉</div>':''}
+    <h3>💡 Suggested — add to plan <span class="ct">${sugg.length}</span></h3>
+    <div class="subtle" style="font-size:.8rem;margin:-.2rem 0 .5rem">Ranked by who's most worth reaching now — overdue check-ins, gone-quiet contacts, and valuable connectors you haven't touched in 3+ weeks. Tap <b>+ Plan</b> to queue, or <b>✕</b> to dismiss for ~30 days.</div>
+    ${sugg.length?sugg.map(suggRow2).join(''):''}
+    
+    ${(!sugg.length)?'<div class="empty">Nothing surfacing right now — you\u2019re caught up. 🎉</div>':''}
   </div>
   `;
 }
@@ -5054,6 +5070,76 @@ function inPlan(cid){return (DB.weekly.plan||[]).some(x=>x.cid===cid);}
 function dueSoon(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.nextTouch && c.nextTouch<=lim && c.status!=='Do not pursue' && !inPlan(c.id)).sort((a,b)=>(a.nextTouch||'').localeCompare(b.nextTouch||''));}
 function goneQuiet(){const lim=addDays(today(),7);return DB.contacts.filter(c=>c.lastTouch && daysAgo(c.lastTouch)>=30 && c.status!=='Do not pursue' && !inPlan(c.id) && !(c.nextTouch && c.nextTouch<=lim)).sort((a,b)=>daysAgo(b.lastTouch)-daysAgo(a.lastTouch));}
 function dueWhy(c){if(!c.nextTouch)return '';return c.nextTouch<today()?'overdue · '+relDay(c.nextTouch):'due '+relDay(c.nextTouch);}
+function suggSnoozed(c){return c.suggSnooze && c.suggSnooze>today();}
+function suggestValue(c){
+  let v=0;
+  if(c.strength==='Strong')v+=18; else if(c.strength==='Medium')v+=10; else if(c.strength==='Unknown')v+=3;
+  const roleV={'Connector':18,'Referral Source':12,'Hiring Manager':8,'Recruiter':6,'Peer':3}[c.roleType||''];
+  if(roleV)v+=roleV;
+  const sr=guessSeniority(c.title||'').rank;
+  if(sr>=4)v+=10; else if(sr===3)v+=7;
+  if(/(fintech|financ|credit|lend|mortgage|bank|smb|small business|affiliate|partner|performance|growth|marketing|ecommerce|e-commerce|commerce|dtc|shopify)/i.test((c.title||'')+' '+(c.company||'')))v+=8;
+  return v;
+}
+function suggestScore(c){
+  if(!c||c.status==='Do not pursue'||inPlan(c.id)||suggSnoozed(c)) return null;
+  const rec=daysAgo(c.lastTouch); // days since last touch, or null
+  const isConn=(c.roleType==='Connector'||c.roleType==='Referral Source');
+  const strongish=(c.strength==='Strong'||c.strength==='Medium');
+  let timing=0, reasons=[];
+  // due / overdue via next check-in
+  if(c.nextTouch){
+    const diff=Math.round((ymdUTC(c.nextTouch)-ymdUTC(today()))/86400000);
+    if(diff<0){timing+=60+Math.min(Math.abs(diff),30);reasons.push('overdue '+Math.abs(diff)+'d');}
+    else if(diff===0){timing+=55;reasons.push('due today');}
+    else if(diff<=7){timing+=40-diff;reasons.push('due '+relDay(c.nextTouch));}
+  }
+  // gone quiet — starts counting at 3 weeks
+  if(rec!=null && rec>=21){timing+=Math.min(rec-14,40);reasons.push(rec+'d quiet');}
+  // valuable-but-never-logged: let them surface
+  if(rec==null && !c.nextTouch){timing+=10;reasons.push('no touch logged');}
+  // reconnect bonus: strong/medium connectors quiet 3+ weeks
+  if(isConn && strongish && rec!=null && rec>=21)timing+=25;
+  // recently-touched dampener — don't nag about people you're already working
+  if(rec!=null && rec<14 && timing<55)timing-=50;
+  if(timing<=0) return null;
+  const score=timing+suggestValue(c);
+  if(score<=0) return null;
+  // readable "why": lead with the value tag, then the timing reason
+  let vtag='';
+  if(isConn)vtag=(c.strength==='Strong'?'strong ':'')+'connector';
+  else if(c.roleType==='Hiring Manager')vtag='hiring manager';
+  else if(c.roleType==='Recruiter')vtag='recruiter';
+  else {const s=guessSeniority(c.title||'');if(s.rank>=4)vtag=s.label;}
+  const why=[...new Set([vtag,...reasons].filter(Boolean))].slice(0,3).join(' · ');
+  return {c,score,why};
+}
+function suggestions(){
+  return DB.contacts.map(suggestScore).filter(Boolean).sort((a,b)=>b.score-a.score).slice(0,14);
+}
+function suggestDismiss(cid){const c=contact(cid);if(!c)return;c.suggSnooze=addDays(today(),30);saveDB();renderOutreach();toast('Dismissed — back in ~30 days');}
+function suggRow2(s){
+  const c=s.c;
+  return `<div class="queue-item">
+    <div class="qi-main" onclick="openContact('${c.id}')" style="cursor:pointer">
+      <div class="qi-name">${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span></div>
+      <div class="qi-meta">${esc(c.title||c.roleType||'')}${s.why?' · '+s.why:''}</div>
+    </div>
+    <div style="display:flex;gap:.35rem;align-items:center;flex:0 0 auto">
+      <button class="btn ghost sm" onclick="event.stopPropagation();planAdd('${c.id}')">+ Plan</button>
+      <button class="sugg-x" title="Dismiss for ~30 days" onclick="event.stopPropagation();suggestDismiss('${c.id}')">✕</button>
+    </div>
+  </div>`;
+}
+function planAddSearch(q){
+  const box=$('#planAddResults');if(!box)return;
+  q=(q||'').trim().toLowerCase();
+  if(!q){box.innerHTML='';box.style.display='none';return;}
+  const m=DB.contacts.filter(c=>!inPlan(c.id) && c.status!=='Do not pursue' && ((c.name||'').toLowerCase().includes(q)||(c.company||'').toLowerCase().includes(q))).slice(0,7);
+  box.style.display=m.length?'block':'none';
+  box.innerHTML=m.map(c=>`<div class="plan-add-item" onclick="planAddPick('${c.id}')"><b>${esc(c.name)}</b> <span class="subtle">· ${esc(c.company||'')}${c.title?' · '+esc(c.title):''}</span></div>`).join('');
+}
+function planAddPick(cid){planAdd(cid);const i=$('#planAddSearch');if(i)i.value='';const b=$('#planAddResults');if(b){b.innerHTML='';b.style.display='none';}}
 function planDefaultAction(c){if(['Check in','Send update','Ask for intro','Schedule call'].includes(c.nextStep))return c.nextStep;if(c.lastTouch && daysAgo(c.lastTouch)>=30)return 'Reconnect';return 'Check in';}
 function planAdd(cid,action){DB.weekly.plan=DB.weekly.plan||[];if(DB.weekly.plan.some(x=>x.cid===cid)){toast('Already in your plan');return;}const c=contact(cid);if(!c)return;DB.weekly.plan.push({id:uid('pl'),cid,action:action||planDefaultAction(c),done:false});saveDB();renderOutreach();toast('Added to plan');}
 function planRemove(id){DB.weekly.plan=(DB.weekly.plan||[]).filter(x=>x.id!==id);saveDB();renderOutreach();}
@@ -5122,12 +5208,22 @@ function qiRow(c){
 }
 function renderGoals(){
   const box=$('#goalList');if(!box)return;const g=DB.weekly.goals;
-  box.innerHTML = g.length? g.map((x,i)=>`
-    <div class="goal ${x.done?'done':''}">
+  box.innerHTML = g.length? g.map((x,i)=>{
+    const overdue = x.due && x.due<today() && !x.done;
+    const dueToday = x.due && x.due===today() && !x.done;
+    const flag = overdue?'<span class="chip amber">overdue</span>':(dueToday?'<span class="chip green">today</span>':'');
+    return `
+    <div class="goal ${x.done?'done':''}${overdue?' overdue':''}">
+      <div class="goal-reorder">
+        <button class="mini" title="To top" onclick="goalMove(${i},'top')">⤒</button>
+        <button class="mini" title="Up" onclick="goalMove(${i},'up')">↑</button>
+        <button class="mini" title="Down" onclick="goalMove(${i},'down')">↓</button>
+      </div>
       <div class="box" onclick="toggleGoal(${i})">${x.done?'✓':''}</div>
       <div class="gt" contenteditable="true" spellcheck="false" title="Click to edit" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="saveGoalText(${i},this.textContent)">${esc(x.text)}</div>
+      <div class="goal-due-wrap">${flag}<input type="date" class="goal-due" value="${x.due||''}" onchange="goalSetDue(${i},this.value)" title="Due day"></div>
       <button class="del" onclick="delGoal(${i})">✕</button>
-    </div>`).join('') : '<div class="subtle" style="padding:.4rem .2rem">No goals yet. What are the 3 things that make this week a win?</div>';
+    </div>`;}).join('') : '<div class="subtle" style="padding:.4rem .2rem">No goals yet. What are the 3 things that make this week a win?</div>';
 }
 function saveGoalText(i,txt){
   const g=DB.weekly.goals[i];if(!g)return;
@@ -5138,6 +5234,12 @@ function saveGoalText(i,txt){
 function addGoal(){const i=$('#goalInp');const v=(i.value||'').trim();if(!v)return;DB.weekly.goals.push({text:v,done:false});i.value='';saveDB();renderGoals();$('#goalList').scrollIntoView({block:'nearest'});}
 function toggleGoal(i){DB.weekly.goals[i].done=!DB.weekly.goals[i].done;saveDB();renderWeek();}
 function delGoal(i){DB.weekly.goals.splice(i,1);saveDB();renderWeek();}
+function goalMove(i,dir){const a=DB.weekly.goals;if(i<0||i>=a.length)return;
+  if(dir==='top'){if(i===0)return;a.unshift(a.splice(i,1)[0]);}
+  else if(dir==='up'){if(i===0)return;[a[i-1],a[i]]=[a[i],a[i-1]];}
+  else if(dir==='down'){if(i>=a.length-1)return;[a[i+1],a[i]]=[a[i],a[i+1]];}
+  saveDB();renderGoals();}
+function goalSetDue(i,v){const g=DB.weekly.goals[i];if(!g)return;g.due=(v||'').trim();saveDB();renderGoals();}
 function editFocus(){const v=prompt('This week\u2019s focus — what makes it a win?',DB.weekly.focus||'');if(v!==null){DB.weekly.focus=v.trim();DB.weekly.weekOf=DB.weekly.weekOf||today();saveDB();renderWeek();}}
 
 /* ============================================================
