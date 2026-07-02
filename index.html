@@ -4910,6 +4910,27 @@ function followRow(c){
     <span class="chip ${cls}" title="${esc(c.nextTouch)}">⏰ ${when}</span>
   </div>`;
 }
+function planMirrorRow(it,i){
+  const c=contact(it.cid);if(!c)return '';
+  let when,cls;
+  if(c.nextTouch){
+    const diff=Math.round((ymdUTC(c.nextTouch)-ymdUTC(today()))/86400000);
+    if(diff<0){when='overdue '+Math.abs(diff)+'d';cls='amber';}
+    else if(diff===0){when='today';cls='green';}
+    else if(diff===1){when='tomorrow';cls='green';}
+    else {when='in '+diff+'d';cls='green';}
+  } else {
+    const days=daysAgo(c.lastTouch);
+    when=(days!=null)?days+'d ago':'no touch';cls='';
+  }
+  return `<div class="queue-item">
+    <div class="qi-main" onclick="openContact('${c.id}')" style="cursor:pointer">
+      <div class="qi-name"><span class="subtle" style="font-variant-numeric:tabular-nums;margin-right:.15rem">${i+1}.</span>${esc(c.name)} <span class="subtle">· ${esc(c.company)}</span></div>
+      <div class="qi-meta">${esc(c.title||c.roleType||'')}${it.action?' · '+esc(it.action):''}</div>
+    </div>
+    <span class="chip ${cls}" title="${esc(c.nextTouch||'')}">${when}</span>
+  </div>`;
+}
 function relDay(d){
   if(!d)return '';
   const diff=Math.round((ymdUTC(d)-ymdUTC(today()))/86400000);
@@ -4947,7 +4968,7 @@ function renderWeek(){
   const w=DB.weekly; w.plan=w.plan||[];
   const interviewing=activeTargets().filter(c=>/interview/i.test(c.status));
   const warm=activeTargets().filter(c=>/warm|active|conversation|recruiter/i.test(c.status));
-  const upCalls=upcomingCalls(), followUps=followSoon();
+  const upCalls=upcomingCalls();
   const planActive=(w.plan||[]).filter(x=>!x.done);
   const dueWeekAll=DB.contacts.filter(c=>c.nextTouch && c.nextTouch<=addDays(today(),7) && c.status!=='Do not pursue').length;
   const p=$('#panel-week');
@@ -4980,8 +5001,8 @@ function renderWeek(){
       <div>${upCalls.length?upCalls.slice(0,8).map(callRow).join(''):'<div class="empty">No calls booked. On a contact, set Next step → “Call scheduled” and add the date.</div>'}</div>
     </div>
     <div class="card card-pad">
-      <h3>⏰ Follow up soon <span class="ct">${followUps.length}</span></h3>
-      <div>${followUps.length?followUps.slice(0,8).map(followRow).join('')+(followUps.length>8?`<div class="subtle" style="font-size:.75rem;margin-top:.4rem">+ ${followUps.length-8} more due soon</div>`:''):'<div class="empty">No follow-ups due in the next 10 days. Set a Next check-in date on a contact to see them here.</div>'}</div>
+      <h3 onclick="goTab('outreach')" style="cursor:pointer" title="Open the Outreach tab">📨 Follow Ups <span class="ct">${planActive.length}</span></h3>
+      <div>${planActive.length?planActive.slice(0,8).map(planMirrorRow).join('')+(planActive.length>8?`<div class="subtle" style="font-size:.75rem;margin-top:.4rem">+ ${planActive.length-8} more in your plan ↗</div>`:''):'<div class="empty">Your outreach plan is empty. Add people from the Outreach tab.</div>'}</div>
     </div>
     <div class="card card-pad">
       <h3>🔥 Pipeline <span class="ct">${interviewing.length+warm.length} live</span></h3>
